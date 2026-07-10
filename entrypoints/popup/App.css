@@ -1,0 +1,89 @@
+#root {
+  width: 340px;
+}
+
+.popup {
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+}
+
+.badge {
+  width: fit-content;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+}
+
+.popup h1 {
+  color: #111827;
+  font-size: 24px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.popup p {
+  color: #4b5563;
+  font-size: 14px;
+  margin: 0;
+}
+
+.settings {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: grid;
+  margin: 0;
+}
+
+.settings div {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.settings div + div {
+  border-top: 1px solid #e5e7eb;
+}
+
+.settings dt {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.settings dd {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+  text-transform: capitalize;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.actions button {
+  align-items: center;
+  background: #111827;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 600;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.actions button:last-child {
+  background: #f3f4f6;
+  color: #111827;
+}

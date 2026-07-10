@@ -1,0 +1,80 @@
+.options {
+  display: grid;
+  gap: 24px;
+  margin: 0 auto;
+  max-width: 720px;
+  padding: 48px 24px;
+}
+
+.options header {
+  display: grid;
+  gap: 12px;
+}
+
+.badge {
+  width: fit-content;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+}
+
+.options h1 {
+  color: #111827;
+  font-size: 28px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: grid;
+}
+
+.row {
+  align-items: center;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  min-height: 88px;
+  padding: 20px;
+}
+
+.row + .row {
+  border-top: 1px solid #e5e7eb;
+}
+
+.row span {
+  display: grid;
+  gap: 4px;
+}
+
+.row strong {
+  color: #111827;
+  font-size: 15px;
+}
+
+.row small {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.row input,
+.row select {
+  font: inherit;
+}
+
+.row input {
+  height: 18px;
+  width: 18px;
+}
+
+.row select {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+}
