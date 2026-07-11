@@ -6,6 +6,14 @@ It includes a popup, a thin options page, a background service worker, a content
 script, typed messaging, typed storage, scoped logging, GitHub Actions, Vitest,
 and Biome.
 
+## Product Design
+
+- [Domain language](./CONTEXT.md)
+- [Product plan](./docs/product-plan.md)
+- [Technical architecture](./docs/technical-architecture.md)
+- [Implementation plan](./docs/implementation-plan.md)
+- [Architecture decisions](./docs/adr/)
+
 ## Project Shape
 
 ```txt
