@@ -6,6 +6,7 @@ import {
 } from './settings-model';
 
 export {
+  CURRENT_SETTINGS_SCHEMA_VERSION,
   DEFAULT_SETTINGS,
   type ExtensionSettings,
   type ExtensionTheme,
@@ -24,7 +25,7 @@ export async function getSettings(): Promise<ExtensionSettings> {
 }
 
 export async function setSettings(
-  patch: Partial<ExtensionSettings>,
+  patch: Partial<Omit<ExtensionSettings, 'schemaVersion'>>,
 ): Promise<ExtensionSettings> {
   const nextSettings = resolveSettings({
     ...(await getSettings()),

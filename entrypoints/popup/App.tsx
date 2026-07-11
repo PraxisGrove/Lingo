@@ -35,12 +35,9 @@ function App() {
 
   return (
     <main className="popup">
-      <div className="badge">WXT</div>
-      <h1>Browser Extension</h1>
-      <p>
-        A typed starter for popup, options, background, content script,
-        messaging, and storage workflows.
-      </p>
+      <div className="badge">Lingo</div>
+      <h1>Bilingual webpage translation</h1>
+      <p>Translation controls will become available after initial setup.</p>
       <dl className="settings">
         <div>
           <dt>Status</dt>
@@ -60,7 +57,7 @@ function App() {
           Ping
         </button>
         <button type="button" onClick={() => browser.runtime.openOptionsPage()}>
-          Options
+          Settings
         </button>
       </div>
     </main>

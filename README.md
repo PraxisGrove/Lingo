@@ -1,10 +1,12 @@
-# Browser Extension Template
+# Lingo Translation
 
-A WXT, React, and TypeScript starter for serious browser extension products.
+Lingo is an open-source bilingual webpage translation extension. It keeps the
+original text in context and sends content only to the translation service the
+reader explicitly configures.
 
-It includes a popup, a thin options page, a background service worker, a content
-script, typed messaging, typed storage, scoped logging, GitHub Actions, Vitest,
-and Biome.
+The repository currently contains the product and technical design plus the
+productized extension foundation. The end-to-end translation workflow is the
+next implementation stage.
 
 ## Product Design
 
@@ -14,43 +16,9 @@ and Biome.
 - [Implementation plan](./docs/implementation-plan.md)
 - [Architecture decisions](./docs/adr/)
 
-## Project Shape
+## Development
 
-```txt
-entrypoints/
-  background.ts          # Background service worker
-  content.ts             # Minimal-permission content script example
-  options/               # Thin settings page
-  popup/                 # Popup UI
-lib/
-  logger/                # Scoped local logging
-  messaging/             # Typed runtime messages
-  storage/               # Typed settings storage
-```
-
-## Logging
-
-Use `createLogger('scope')` from `lib/logger/logger.ts` instead of direct
-`console.*` calls. Logs are scoped, accept typed context objects, default to
-`debug` in development, and default to `warn` in production builds.
-
-This template intentionally does not ship remote log collection. Add a telemetry
-or error-reporting provider only after the product has a clear privacy policy,
-consent model, and data-retention plan.
-
-## Permissions
-
-The template defaults to minimal permissions. The content script only matches:
-
-```ts
-['https://example.com/*']
-```
-
-Change `entrypoints/content.ts` when your extension needs a real host. Avoid
-`<all_urls>` or broad `http://*/*` / `https://*/*` matches unless the product
-really requires full-site access.
-
-## Scripts
+Prerequisites are Node.js 22 and pnpm 11.
 
 ```bash
 pnpm install
@@ -59,26 +27,25 @@ pnpm compile
 pnpm test
 pnpm check
 pnpm build
-pnpm zip
 ```
 
-Use `pnpm dev:firefox`, `pnpm build:firefox`, or `pnpm zip:firefox` when targeting Firefox.
+Use `pnpm dev:firefox`, `pnpm build:firefox`, or `pnpm zip:firefox` for
+Firefox. Chrome and Edge use the default Chromium build.
 
-## CI/CD
+## Privacy and Permissions
 
-GitHub Actions runs `pnpm compile`, `pnpm test`, `pnpm check`, and `pnpm build`
-on pushes to `main` and pull requests.
+Lingo requests access to webpages so it can identify and present translated
+content. Phase 0 does not make translation requests or collect telemetry.
+Future translation requests will go directly from the extension background
+worker to the service selected by the reader.
 
-Pushing a tag like `v1.0.0` builds Chrome and Firefox zip packages and creates a
-draft GitHub release. The workflow intentionally does not publish to Chrome Web
-Store or Firefox Add-ons automatically; submit the generated packages manually
-unless the product has a reviewed release process and store credentials in place.
+See the [privacy policy](./PRIVACY.md), [permission explanation](./docs/permissions.md),
+and [security policy](./SECURITY.md) for the current guarantees and reporting
+process.
 
-## Before Shipping
+## Contributing and License
 
-- Update `name`, `description`, and `version` in `package.json` and
-  `wxt.config.ts`.
-- Replace the icons in `public/icon/`.
-- Review content script matches and any future permissions.
-- Run `pnpm compile`, `pnpm test`, `pnpm check`, and `pnpm build`.
-- Use `pnpm zip` for Chrome/Edge and `pnpm zip:firefox` for Firefox.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) before submitting changes. Lingo is
+licensed under the [GNU Affero General Public License v3.0](./LICENSE). External
+contributions require agreement to the [CLA](./CLA.md). The CLA and other legal
+texts require legal review before the first public release.

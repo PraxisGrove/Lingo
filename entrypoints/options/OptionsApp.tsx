@@ -21,7 +21,9 @@ function OptionsApp() {
     return watchSettings(setSettingsState);
   }, []);
 
-  async function updateSettings(patch: Partial<ExtensionSettings>) {
+  async function updateSettings(
+    patch: Partial<Omit<ExtensionSettings, 'schemaVersion'>>,
+  ) {
     const nextSettings = await setSettings(patch);
     setSettingsState(nextSettings);
     logger.debug('Settings updated.', { patch });
@@ -30,15 +32,15 @@ function OptionsApp() {
   return (
     <main className="options">
       <header>
-        <div className="badge">Options</div>
-        <h1>Browser Extension Template</h1>
+        <div className="badge">Lingo</div>
+        <h1>Settings</h1>
       </header>
 
       <section className="panel" aria-label="Extension settings">
         <label className="row">
           <span>
             <strong>Enabled</strong>
-            <small>Turn the starter behavior on or off.</small>
+            <small>Allow Lingo to run on supported webpages.</small>
           </span>
           <input
             type="checkbox"
@@ -52,7 +54,7 @@ function OptionsApp() {
         <label className="row">
           <span>
             <strong>Theme</strong>
-            <small>Persist a typed setting through WXT storage.</small>
+            <small>Choose how Lingo follows your browser appearance.</small>
           </span>
           <select
             value={settingsState.theme}

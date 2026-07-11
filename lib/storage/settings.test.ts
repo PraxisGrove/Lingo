@@ -7,10 +7,31 @@ describe('resolveSettings', () => {
   });
 
   it('keeps valid settings', () => {
-    expect(resolveSettings({ enabled: false, theme: 'dark' })).toEqual({
+    expect(
+      resolveSettings({ schemaVersion: 1, enabled: false, theme: 'dark' }),
+    ).toEqual({
+      schemaVersion: 1,
       enabled: false,
       theme: 'dark',
     });
+  });
+
+  it('migrates settings saved before schema versioning', () => {
+    expect(resolveSettings({ enabled: false, theme: 'light' })).toEqual({
+      schemaVersion: 1,
+      enabled: false,
+      theme: 'light',
+    });
+  });
+
+  it('falls back safely for an unknown future schema', () => {
+    expect(
+      resolveSettings({
+        schemaVersion: 99,
+        enabled: false,
+        theme: 'dark',
+      } as never),
+    ).toEqual(DEFAULT_SETTINGS);
   });
 
   it('falls back when values are invalid', () => {

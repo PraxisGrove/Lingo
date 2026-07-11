@@ -48,4 +48,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" .output/*.zip \
             --draft \
             --title "$GITHUB_REF_NAME" \
-            --notes "Browser extension packages for manual store submission."
+            --notes "Lingo Translation packages for manual store submission."

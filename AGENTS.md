@@ -2,7 +2,8 @@
 
 ## Project Structure & Module Organization
 
-This is a WXT browser extension template using React and TypeScript.
+This is the Lingo bilingual webpage translation extension, built with WXT,
+React, and TypeScript.
 
 - `entrypoints/background.ts` contains the background service worker.
 - `entrypoints/content.ts` contains the minimal content script example.
@@ -49,4 +50,7 @@ Pull requests should include a short description, validation commands run, and s
 
 ## Security & Configuration Tips
 
-Keep default permissions minimal. Do not add broad host matches like `<all_urls>` unless the product requires them. This template does not include remote logging or telemetry by default; add those only with a clear privacy policy and consent model.
+Keep permissions limited to documented product requirements. Lingo uses
+`<all_urls>` for webpage translation as explained in `docs/permissions.md` and
+ADR-0008. The extension does not include remote logging or telemetry by
+default; add those only with a clear privacy policy and consent model.

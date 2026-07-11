@@ -1,11 +1,13 @@
 {
-  "name": "browser-extension-template",
-  "description": "A WXT browser extension template.",
+  "name": "lingo-translation",
+  "description": "Open-source bilingual webpage translation extension.",
+  "license": "AGPL-3.0-only",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "packageManager": "pnpm@11.8.0",
   "scripts": {
+    "icons": "node scripts/generate-icons.mjs",
     "dev": "wxt",
     "dev:firefox": "wxt -b firefox",
     "build": "wxt build",
