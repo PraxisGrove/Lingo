@@ -1,0 +1,24 @@
+pre-commit:
+  commands:
+    format:
+      run: pnpm format
+      stage_fixed: true
+    lint:
+      run: pnpm lint
+    test:
+      run: pnpm test
+    typecheck:
+      run: pnpm compile
+    check:
+      run: pnpm check
+    build-chrome:
+      run: pnpm build
+    build-firefox:
+      run: pnpm build:firefox
+    whitespace:
+      run: git diff --check
+
+commit-msg:
+  commands:
+    conventional-commit:
+      run: pnpm commitlint --edit {1}

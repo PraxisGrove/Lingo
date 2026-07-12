@@ -20,8 +20,9 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check .",
+    "commitlint": "commitlint",
     "verify:commit": "pnpm lint && pnpm test && pnpm compile && pnpm check && pnpm build && pnpm build:firefox && git diff --check",
-    "prepare": "husky",
+    "prepare": "lefthook install",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
@@ -31,11 +32,13 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@wxt-dev/module-react": "^1.1.5",
     "happy-dom": "^20.10.6",
-    "husky": "^9.1.7",
+    "lefthook": "^2.1.10",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10",
     "wxt": "^0.20.27"
