@@ -153,6 +153,43 @@ function OptionsApp() {
             </select>
           </label>
         )}
+        {settings.providerProfiles.length > 1 && (
+          <fieldset className="fallback-chain">
+            <legend>Fallback services</legend>
+            {settings.providerProfiles
+              .filter((item) => item.id !== settings.activeProviderProfileId)
+              .map((item) => (
+                <label key={item.id}>
+                  <input
+                    type="checkbox"
+                    checked={settings.fallbackProviderProfileIds.includes(
+                      item.id,
+                    )}
+                    onChange={(event) =>
+                      void updateSettings({
+                        fallbackProviderProfileIds: event.currentTarget.checked
+                          ? [...settings.fallbackProviderProfileIds, item.id]
+                          : settings.fallbackProviderProfileIds.filter(
+                              (id) => id !== item.id,
+                            ),
+                      })
+                    }
+                  />
+                  {item.name}
+                </label>
+              ))}
+            {settings.fallbackProviderProfileIds.length > 0 && (
+              <ol className="fallback-order">
+                {settings.fallbackProviderProfileIds.map((id) => (
+                  <li key={id}>
+                    {settings.providerProfiles.find((item) => item.id === id)
+                      ?.name ?? id}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </fieldset>
+        )}
         <div className="form-grid">
           <label>
             Provider
@@ -231,6 +268,30 @@ function OptionsApp() {
         </div>
       </section>
       <section className="panel" aria-label="Extension settings">
+        <label className="row">
+          <span>
+            <strong>Translation cache</strong>
+            <small>
+              Reuse local translations from the same service and model.
+            </small>
+          </span>
+          <input
+            type="checkbox"
+            checked={settings.translationCacheEnabled}
+            onChange={(event) =>
+              void updateSettings({
+                translationCacheEnabled: event.currentTarget.checked,
+              })
+            }
+          />
+        </label>
+        <button
+          className="clear-cache"
+          type="button"
+          onClick={() => void sendMessage('clearTranslationCache', {})}
+        >
+          Clear translation cache
+        </button>
         <label className="row">
           <span>
             <strong>Enabled</strong>

@@ -1,6 +1,6 @@
 export type ExtensionTheme = 'system' | 'light' | 'dark';
 
-export const CURRENT_SETTINGS_SCHEMA_VERSION = 2 as const;
+export const CURRENT_SETTINGS_SCHEMA_VERSION = 3 as const;
 
 export type ProviderKind =
   | 'openai-compatible'
@@ -25,6 +25,8 @@ export type ExtensionSettings = {
   targetLanguage: string;
   providerProfiles: ProviderProfile[];
   activeProviderProfileId: string | null;
+  fallbackProviderProfileIds: string[];
+  translationCacheEnabled: boolean;
   setupCompleted: boolean;
 };
 
@@ -36,6 +38,8 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   targetLanguage: 'zh-CN',
   providerProfiles: [],
   activeProviderProfileId: null,
+  fallbackProviderProfileIds: [],
+  translationCacheEnabled: true,
   setupCompleted: false,
 };
 
@@ -50,6 +54,7 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
   if (
     candidate.schemaVersion !== undefined &&
     candidate.schemaVersion !== 1 &&
+    candidate.schemaVersion !== 2 &&
     candidate.schemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION
   ) {
     return DEFAULT_SETTINGS;
@@ -82,6 +87,20 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
     )
       ? requestedActiveId
       : null,
+    fallbackProviderProfileIds: Array.isArray(
+      candidate.fallbackProviderProfileIds,
+    )
+      ? candidate.fallbackProviderProfileIds.filter(
+          (id): id is string =>
+            typeof id === 'string' &&
+            id !== requestedActiveId &&
+            providerProfiles.some((profile) => profile.id === id),
+        )
+      : [],
+    translationCacheEnabled:
+      typeof candidate.translationCacheEnabled === 'boolean'
+        ? candidate.translationCacheEnabled
+        : DEFAULT_SETTINGS.translationCacheEnabled,
     setupCompleted: candidate.setupCompleted === true,
   };
 }

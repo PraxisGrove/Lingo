@@ -49,6 +49,10 @@ export type ExtensionMessages = {
     request: { profile: ProviderProfile; credential: string };
     response: { ok: true } | { ok: false; category: string; message: string };
   };
+  clearTranslationCache: {
+    request: Record<string, never>;
+    response: { ok: true };
+  };
 };
 
 export type MessageName = keyof ExtensionMessages;
@@ -82,6 +86,7 @@ export function isExtensionMessage(
       );
     case 'getPageTranslation':
     case 'stopPageTranslation':
+    case 'clearTranslationCache':
       return isRecordWithKeys(message.payload, []);
     case 'startPageTranslation':
       return (

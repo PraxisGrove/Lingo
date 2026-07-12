@@ -53,6 +53,20 @@ describe('resolveSettings', () => {
     });
   });
 
+  it('keeps an ordered fallback chain without the active provider', () => {
+    expect(
+      resolveSettings({
+        ...DEFAULT_SETTINGS,
+        activeProviderProfileId: 'primary',
+        fallbackProviderProfileIds: ['primary', 'fallback', 'missing'],
+        providerProfiles: [
+          { id: 'primary', name: 'Primary', provider: 'deepl' },
+          { id: 'fallback', name: 'Fallback', provider: 'google-cloud' },
+        ],
+      }),
+    ).toMatchObject({ fallbackProviderProfileIds: ['fallback'] });
+  });
+
   it('drops invalid profiles and an unknown active profile', () => {
     expect(
       resolveSettings({

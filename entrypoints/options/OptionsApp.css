@@ -113,6 +113,31 @@
   gap: 12px;
   padding: 16px 20px;
 }
+.fallback-chain {
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 16px 20px;
+}
+.fallback-chain legend {
+  color: #374151;
+  font-size: 13px;
+  padding: 0;
+}
+.fallback-chain label {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+}
+.fallback-order {
+  color: #6b7280;
+  font-size: 12px;
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
 .translation-preview {
   background: #f9fafb;
   border-top: 1px solid #e5e7eb;
@@ -135,6 +160,15 @@
 
 .row + .row {
   border-top: 1px solid #e5e7eb;
+}
+.clear-cache {
+  background: transparent;
+  border: 0;
+  color: #4f46e5;
+  font: inherit;
+  padding: 0 20px 20px;
+  text-align: left;
+  width: fit-content;
 }
 
 .row span {

@@ -1,6 +1,9 @@
 import { credentialStore } from '../storage/credentials';
 import { getSettings, setSettings } from '../storage/settings';
-import type { ProviderProfile } from '../storage/settings-model';
+import type {
+  ExtensionSettings,
+  ProviderProfile,
+} from '../storage/settings-model';
 import type {
   ProviderBatchInput,
   ProviderBatchResult,
@@ -26,6 +29,42 @@ export async function translateWithActiveProvider(
     sourceLanguage: settings.sourceLanguage,
     targetLanguage: settings.targetLanguage,
   });
+}
+
+export async function getActiveProviderChain(): Promise<TranslationProvider[]> {
+  return createProviderChain(await getSettings());
+}
+
+export async function createProviderChain(
+  settings: ExtensionSettings,
+  getCredential: (profileId: string) => Promise<string | null> = (profileId) =>
+    credentialStore.get(profileId),
+): Promise<TranslationProvider[]> {
+  const profileIds = [
+    settings.activeProviderProfileId,
+    ...settings.fallbackProviderProfileIds,
+  ].filter((id): id is string => id !== null);
+  const providers = await Promise.all(
+    profileIds.map(async (id) => {
+      const profile = settings.providerProfiles.find((item) => item.id === id);
+      if (!profile)
+        throw new ProviderError(
+          'invalid-request',
+          'A configured provider is missing.',
+        );
+      const credential = await getCredential(profile.id);
+      return {
+        ...createProvider(profile, credential ?? ''),
+        id: `${profile.id}:${profile.model ?? ''}`,
+      };
+    }),
+  );
+  if (providers.length === 0)
+    throw new ProviderError(
+      'invalid-request',
+      'Configure a translation service first.',
+    );
+  return providers;
 }
 
 export async function testProviderProfile(

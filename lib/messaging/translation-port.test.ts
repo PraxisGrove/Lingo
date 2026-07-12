@@ -61,7 +61,7 @@ describe('translation port protocol', () => {
     ).toBe(false);
   });
 
-  it('rejects a pending translation and consumes the runtime error when the port disconnects', async () => {
+  it('rejects a pending translation and reconnects for the next request', async () => {
     const messageListeners = new Set<(message: unknown) => void>();
     const disconnectListeners = new Set<() => void>();
     let runtimeErrorRead = false;
@@ -78,8 +78,10 @@ describe('translation port protocol', () => {
       postMessage() {},
       disconnect() {},
     };
+    const replacementPort = createCompletedPort();
+    let connections = 0;
     const client = createTranslationPortClient(
-      () => port,
+      () => (connections++ === 0 ? port : replacementPort),
       () => 'session-1',
       () => {
         runtimeErrorRead = true;
@@ -93,14 +95,42 @@ describe('translation port protocol', () => {
     );
     for (const listener of disconnectListeners) listener();
 
-    await expect(translation).rejects.toThrow(
-      'Translation connection closed: The page entered the back/forward cache.',
-    );
+    await expect(translation).resolves.toEqual([]);
     expect(runtimeErrorRead).toBe(true);
     expect(messageListeners).toHaveLength(0);
     expect(disconnectListeners).toHaveLength(0);
-    await expect(client.translate([], 'zh-CN')).rejects.toThrow(
-      'Translation connection closed',
-    );
+    await expect(client.translate([], 'zh-CN')).resolves.toEqual([]);
+    expect(connections).toBe(2);
   });
 });
+
+function createCompletedPort(): TranslationRuntimePort {
+  const messageListeners = new Set<(message: unknown) => void>();
+  return {
+    name: TRANSLATION_PORT_NAME,
+    onMessage: {
+      addListener: (listener) => messageListeners.add(listener),
+      removeListener: (listener) => messageListeners.delete(listener),
+    },
+    onDisconnect: { addListener() {}, removeListener() {} },
+    postMessage(message) {
+      const request = message as {
+        request: { sessionId: string; pageRevision: number };
+      };
+      queueMicrotask(() => {
+        for (const listener of messageListeners) {
+          listener({
+            type: 'translation-event',
+            event: {
+              type: 'completed',
+              sessionId: request.request.sessionId,
+              pageRevision: request.request.pageRevision,
+              unitId: null,
+            },
+          });
+        }
+      });
+    },
+    disconnect() {},
+  };
+}

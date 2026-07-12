@@ -1,19 +1,30 @@
 import { createLogger } from '@/lib/logger/logger';
+import {
+  createConditionalTranslationCache,
+  createTranslationCache,
+} from '@/lib/cache/translation-cache';
 import { isExtensionMessage } from '@/lib/messaging/messages';
 import {
   serveTranslationPort,
   TRANSLATION_PORT_NAME,
 } from '@/lib/messaging/translation-port';
 import {
-  activeProvider,
+  getActiveProviderChain,
   saveProviderProfile,
   testProviderProfile,
 } from '@/lib/providers/provider-service';
+import { getSettings } from '@/lib/storage/settings';
 import { createTranslationOrchestrator } from '@/lib/translation/orchestrator';
 
 export default defineBackground(() => {
   const logger = createLogger('background');
-  const orchestrator = createTranslationOrchestrator(activeProvider);
+  const translationCache = createTranslationCache();
+  const orchestrator = createTranslationOrchestrator(getActiveProviderChain, {
+    cache: createConditionalTranslationCache(
+      translationCache,
+      async () => (await getSettings()).translationCacheEnabled,
+    ),
+  });
 
   logger.info('Background service worker started.');
 
@@ -51,6 +62,10 @@ export default defineBackground(() => {
           message.payload.credential,
         );
       })();
+    }
+
+    if (message.type === 'clearTranslationCache') {
+      return translationCache.clear().then(() => ({ ok: true as const }));
     }
 
     return undefined;
