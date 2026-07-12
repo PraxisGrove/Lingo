@@ -1,28 +1,28 @@
 pre-commit:
   commands:
-    format:
+    01-format:
       run: pnpm format
       stage_fixed: true
       interactive: true
-    lint:
+    02-lint:
       run: pnpm lint
       interactive: true
-    test:
+    03-test:
       run: pnpm test
       interactive: true
-    typecheck:
+    04-typecheck:
       run: pnpm compile
       interactive: true
-    check:
+    05-check:
       run: pnpm check
       interactive: true
-    build-chrome:
+    06-build-chrome:
       run: pnpm build
       interactive: true
-    build-firefox:
+    07-build-firefox:
       run: pnpm build:firefox
       interactive: true
-    whitespace:
+    08-whitespace:
       run: git diff --check
 
 commit-msg:
