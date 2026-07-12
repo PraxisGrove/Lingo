@@ -7,10 +7,8 @@ describe('resolveSettings', () => {
   });
 
   it('keeps valid settings', () => {
-    expect(
-      resolveSettings({ schemaVersion: 1, enabled: false, theme: 'dark' }),
-    ).toEqual({
-      schemaVersion: 1,
+    expect(resolveSettings({ schemaVersion: 2, enabled: false, theme: 'dark' })).toEqual({
+      ...DEFAULT_SETTINGS,
       enabled: false,
       theme: 'dark',
     });
@@ -18,10 +16,49 @@ describe('resolveSettings', () => {
 
   it('migrates settings saved before schema versioning', () => {
     expect(resolveSettings({ enabled: false, theme: 'light' })).toEqual({
-      schemaVersion: 1,
+      ...DEFAULT_SETTINGS,
       enabled: false,
       theme: 'light',
     });
+  });
+
+  it('keeps valid language and provider profile settings', () => {
+    expect(
+      resolveSettings({
+        schemaVersion: 2,
+        enabled: true,
+        theme: 'system',
+        sourceLanguage: 'en',
+        targetLanguage: 'ja',
+        activeProviderProfileId: 'work',
+        setupCompleted: true,
+        providerProfiles: [
+          {
+            id: 'work',
+            name: 'Work Azure',
+            provider: 'azure-translator',
+            endpoint: 'https://api.cognitive.microsofttranslator.com',
+            region: 'eastus',
+          },
+        ],
+      }),
+    ).toMatchObject({
+      sourceLanguage: 'en',
+      targetLanguage: 'ja',
+      activeProviderProfileId: 'work',
+      setupCompleted: true,
+      providerProfiles: [{ id: 'work', provider: 'azure-translator' }],
+    });
+  });
+
+  it('drops invalid profiles and an unknown active profile', () => {
+    expect(
+      resolveSettings({
+        ...DEFAULT_SETTINGS,
+        activeProviderProfileId: 'missing',
+        providerProfiles: [{ id: '', name: '', provider: 'unknown' }],
+      }),
+    ).toMatchObject({ providerProfiles: [], activeProviderProfileId: null });
   });
 
   it('falls back safely for an unknown future schema', () => {

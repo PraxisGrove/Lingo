@@ -38,7 +38,7 @@ export function isTranslationPortRequest(
     ]) &&
     typeof request.sessionId === 'string' &&
     Number.isInteger(request.pageRevision) &&
-    request.sourceLanguage === 'auto' &&
+    typeof request.sourceLanguage === 'string' &&
     typeof request.targetLanguage === 'string' &&
     Array.isArray(request.units) &&
     request.units.every(isTranslationUnit)

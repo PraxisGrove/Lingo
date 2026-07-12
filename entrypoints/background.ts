@@ -4,12 +4,12 @@ import {
   serveTranslationPort,
   TRANSLATION_PORT_NAME,
 } from '@/lib/messaging/translation-port';
-import { createInMemoryProvider } from '@/lib/providers/in-memory';
+import { activeProvider, saveProviderProfile, testProviderProfile } from '@/lib/providers/provider-service';
 import { createTranslationOrchestrator } from '@/lib/translation/orchestrator';
 
 export default defineBackground(() => {
   const logger = createLogger('background');
-  const orchestrator = createTranslationOrchestrator(createInMemoryProvider());
+  const orchestrator = createTranslationOrchestrator(activeProvider);
 
   logger.info('Background service worker started.');
 
@@ -28,6 +28,19 @@ export default defineBackground(() => {
         timestamp: Date.now(),
         extensionId: browser.runtime.id,
       });
+    }
+
+    if (message.type === 'saveProviderProfile') {
+      return (async () => {
+        await saveProviderProfile(message.payload.profile, message.payload.credential);
+        return { ok: true as const };
+      })();
+    }
+
+    if (message.type === 'testProviderConnection') {
+      return (async () => {
+        return testProviderProfile(message.payload.profile, message.payload.credential);
+      })();
     }
 
     return undefined;

@@ -6,7 +6,7 @@ import type {
 } from './types';
 
 export type ProviderBatchInput = {
-  sourceLanguage: 'auto';
+  sourceLanguage: string;
   targetLanguage: string;
   units: TranslationUnit[];
 };

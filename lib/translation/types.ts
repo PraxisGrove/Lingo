@@ -6,7 +6,7 @@ export type TranslationUnit = {
 export type TranslationRequest = {
   sessionId: string;
   pageRevision: number;
-  sourceLanguage: 'auto';
+  sourceLanguage: string;
   targetLanguage: string;
   units: TranslationUnit[];
 };

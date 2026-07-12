@@ -10,6 +10,8 @@
   display: grid;
   gap: 12px;
 }
+.options header p { color: #4b5563; margin: 0; }
+.skip-button { background: transparent; border: 0; color: #4f46e5; font: inherit; padding: 0; text-align: left; width: fit-content; }
 
 .badge {
   width: fit-content;
@@ -33,6 +35,21 @@
   border-radius: 8px;
   display: grid;
 }
+.panel h2 { font-size: 16px; margin: 0; padding: 20px; }
+.panel h2 + .row { border-top: 1px solid #e5e7eb; }
+.provider-panel { padding-bottom: 20px; }
+.form-grid { border-top: 1px solid #e5e7eb; display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 20px; }
+.form-grid label { color: #374151; display: grid; font-size: 13px; gap: 6px; }
+.form-grid input, .form-grid select { border: 1px solid #d1d5db; border-radius: 6px; font: inherit; min-height: 38px; padding: 0 10px; width: 100%; }
+.connection-actions { align-items: center; display: flex; gap: 16px; padding: 0 20px; }
+.connection-actions button { background: #111827; border: 0; border-radius: 6px; color: white; font: inherit; min-height: 40px; padding: 0 16px; }
+.connection-actions button:disabled { opacity: 0.5; }
+.connection-actions p { color: #374151; font-size: 13px; margin: 0; }
+.privacy-note { color: #6b7280; display: block; padding: 12px 20px 0; }
+.existing-profile { align-items: center; border-top: 1px solid #e5e7eb; display: flex; font-size: 13px; gap: 12px; padding: 16px 20px; }
+.translation-preview { background: #f9fafb; border-top: 1px solid #e5e7eb; display: grid; gap: 6px; margin-top: 20px; padding: 16px 20px; }
+.translation-preview span:last-child { color: #2563eb; }
+@media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } .row { align-items: stretch; flex-direction: column; } }
 
 .row {
   align-items: center;

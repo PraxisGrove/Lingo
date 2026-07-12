@@ -72,7 +72,7 @@ function App() {
           disabled={busy || !settings.enabled || Boolean(error)}
           onClick={() =>
             runCommand('startPageTranslation', {
-              targetLanguage: 'zh-CN',
+              targetLanguage: settings.targetLanguage,
               displayMode: 'bilingual',
             })
           }
@@ -98,7 +98,7 @@ function App() {
   );
 }
 
-type PageMessageName = Exclude<keyof ExtensionMessages, 'ping'>;
+type PageMessageName = 'getPageTranslation' | 'startPageTranslation' | 'stopPageTranslation';
 
 async function sendToActiveTab<TName extends PageMessageName>(
   type: TName,

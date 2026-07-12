@@ -10,6 +10,8 @@ export {
   DEFAULT_SETTINGS,
   type ExtensionSettings,
   type ExtensionTheme,
+  type ProviderKind,
+  type ProviderProfile,
   resolveSettings,
 } from './settings-model';
 
