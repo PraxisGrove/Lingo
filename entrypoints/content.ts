@@ -5,6 +5,7 @@ import './page-translation.css';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
+  allFrames: true,
   main() {
     const client = createTranslationPortClient();
     const pageTranslation = createPageTranslation({
@@ -20,6 +21,8 @@ export default defineContentScript({
           return Promise.resolve(pageTranslation.snapshot());
         case 'startPageTranslation':
           return pageTranslation.start(message.payload);
+        case 'updatePageTranslation':
+          return pageTranslation.update(message.payload);
         case 'stopPageTranslation':
           return pageTranslation.stop().then(() => pageTranslation.snapshot());
         default:

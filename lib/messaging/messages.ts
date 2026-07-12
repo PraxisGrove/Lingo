@@ -25,6 +25,15 @@ export type ExtensionMessages = {
     request: {
       targetLanguage: string;
       displayMode: DisplayMode;
+      contentScope?: 'main' | 'main-and-interface';
+      translateImmediately?: boolean;
+    };
+    response: PageTranslationSnapshot;
+  };
+  updatePageTranslation: {
+    request: {
+      displayMode: DisplayMode;
+      translateImmediately?: boolean;
     };
     response: PageTranslationSnapshot;
   };
@@ -76,9 +85,30 @@ export function isExtensionMessage(
       return isRecordWithKeys(message.payload, []);
     case 'startPageTranslation':
       return (
-        isRecordWithKeys(message.payload, ['targetLanguage', 'displayMode']) &&
+        isRecordWithRequiredAndOptionalKeys(
+          message.payload,
+          ['targetLanguage', 'displayMode'],
+          ['contentScope', 'translateImmediately'],
+        ) &&
         typeof message.payload.targetLanguage === 'string' &&
-        isDisplayMode(message.payload.displayMode)
+        isDisplayMode(message.payload.displayMode) &&
+        (message.payload.contentScope === undefined ||
+          ['main', 'main-and-interface'].includes(
+            message.payload.contentScope as string,
+          )) &&
+        (message.payload.translateImmediately === undefined ||
+          typeof message.payload.translateImmediately === 'boolean')
+      );
+    case 'updatePageTranslation':
+      return (
+        isRecordWithRequiredAndOptionalKeys(
+          message.payload,
+          ['displayMode'],
+          ['translateImmediately'],
+        ) &&
+        isDisplayMode(message.payload.displayMode) &&
+        (message.payload.translateImmediately === undefined ||
+          typeof message.payload.translateImmediately === 'boolean')
       );
     case 'saveProviderProfile':
       return (
@@ -115,7 +145,20 @@ function isProviderProfile(value: unknown): value is ProviderProfile {
 }
 
 function isDisplayMode(value: unknown): value is DisplayMode {
-  return value === 'bilingual';
+  return ['bilingual', 'translation', 'original'].includes(value as string);
+}
+
+function isRecordWithRequiredAndOptionalKeys(
+  value: unknown,
+  required: string[],
+  optional: string[],
+): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const keys = Object.keys(value);
+  return (
+    required.every((key) => key in value) &&
+    keys.every((key) => required.includes(key) || optional.includes(key))
+  );
 }
 
 function isRecordWithKeys(

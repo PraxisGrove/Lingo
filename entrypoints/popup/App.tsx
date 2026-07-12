@@ -16,6 +16,7 @@ const IDLE_SNAPSHOT: SessionSnapshot = {
   status: 'idle',
   displayMode: 'bilingual',
   translatedUnitCount: 0,
+  pageRevision: 0,
 };
 
 function App() {
@@ -74,20 +75,58 @@ function App() {
             runCommand('startPageTranslation', {
               targetLanguage: settings.targetLanguage,
               displayMode: 'bilingual',
+              translateImmediately: false,
             })
           }
         >
           {busy ? 'Translating…' : 'Translate page'}
         </button>
       ) : (
-        <button
-          className="restore-action"
-          type="button"
-          disabled={busy}
-          onClick={() => runCommand('stopPageTranslation', {})}
-        >
-          Show original
-        </button>
+        <>
+          <fieldset
+            className="display-modes"
+            aria-label="Translation display mode"
+          >
+            {(['bilingual', 'translation', 'original'] as const).map((mode) => (
+              <button
+                type="button"
+                aria-pressed={page.displayMode === mode}
+                disabled={busy}
+                onClick={() =>
+                  runCommand('updatePageTranslation', { displayMode: mode })
+                }
+                key={mode}
+              >
+                {mode === 'bilingual'
+                  ? 'Bilingual'
+                  : mode === 'translation'
+                    ? 'Translation'
+                    : 'Original'}
+              </button>
+            ))}
+          </fieldset>
+          <button
+            className="primary-action"
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              runCommand('updatePageTranslation', {
+                displayMode: page.displayMode,
+                translateImmediately: true,
+              })
+            }
+          >
+            Translate to bottom
+          </button>
+          <button
+            className="restore-action"
+            type="button"
+            disabled={busy}
+            onClick={() => runCommand('stopPageTranslation', {})}
+          >
+            Stop and restore
+          </button>
+        </>
       )}
       {error && (
         <p className="error" role="alert">
@@ -101,6 +140,7 @@ function App() {
 type PageMessageName =
   | 'getPageTranslation'
   | 'startPageTranslation'
+  | 'updatePageTranslation'
   | 'stopPageTranslation';
 
 async function sendToActiveTab<TName extends PageMessageName>(
