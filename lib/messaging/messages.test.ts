@@ -10,7 +10,20 @@ describe('messages', () => {
   });
 
   it('identifies extension-shaped messages', () => {
-    expect(isExtensionMessage({ type: 'ping', payload: {} })).toBe(true);
+    expect(
+      isExtensionMessage({ type: 'ping', payload: { source: 'popup' } }),
+    ).toBe(true);
+    expect(isExtensionMessage({ type: 'ping', payload: {} })).toBe(false);
+    expect(
+      isExtensionMessage({
+        type: 'startPageTranslation',
+        payload: {
+          targetLanguage: 'zh-CN',
+          displayMode: 'bilingual',
+          credential: 'must-not-cross-the-message-boundary',
+        },
+      }),
+    ).toBe(false);
     expect(isExtensionMessage(null)).toBe(false);
   });
 });

@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
-import { createLogger } from '@/lib/logger/logger';
-import { sendMessage } from '@/lib/messaging/send-message';
+import {
+  createMessage,
+  type ExtensionMessages,
+} from '@/lib/messaging/messages';
+import type { SessionSnapshot } from '@/lib/page-translation/page-translation';
 import {
   DEFAULT_SETTINGS,
   type ExtensionSettings,
@@ -9,59 +12,109 @@ import {
 } from '@/lib/storage/settings';
 import './App.css';
 
-const logger = createLogger('popup');
+const IDLE_SNAPSHOT: SessionSnapshot = {
+  status: 'idle',
+  displayMode: 'bilingual',
+  translatedUnitCount: 0,
+};
 
 function App() {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
-  const [lastPing, setLastPing] = useState<string>('Not checked yet');
+  const [page, setPage] = useState<SessionSnapshot>(IDLE_SNAPSHOT);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     void getSettings().then(setSettings);
+    void sendToActiveTab('getPageTranslation', {})
+      .then(setPage)
+      .catch(() => setError('Lingo cannot translate this browser page.'));
     return watchSettings(setSettings);
   }, []);
 
-  async function pingBackground() {
+  async function runCommand<TName extends PageMessageName>(
+    type: TName,
+    payload: ExtensionMessages[TName]['request'],
+  ) {
+    setBusy(true);
+    setError('');
     try {
-      const response = await sendMessage('ping', { source: 'popup' });
-      setLastPing(new Date(response.timestamp).toLocaleTimeString());
-      logger.debug('Background ping succeeded.', {
-        extensionId: response.extensionId,
-      });
-    } catch (error) {
-      logger.error('Background ping failed.', { error });
-      setLastPing('Failed');
+      setPage(await sendToActiveTab(type, payload));
+    } catch {
+      setError('This page did not respond. Reload it and try again.');
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
     <main className="popup">
-      <div className="badge">Lingo</div>
-      <h1>Bilingual webpage translation</h1>
-      <p>Translation controls will become available after initial setup.</p>
-      <dl className="settings">
-        <div>
-          <dt>Status</dt>
-          <dd>{settings.enabled ? 'Enabled' : 'Disabled'}</dd>
-        </div>
-        <div>
-          <dt>Theme</dt>
-          <dd>{settings.theme}</dd>
-        </div>
-        <div>
-          <dt>Background</dt>
-          <dd>{lastPing}</dd>
-        </div>
-      </dl>
-      <div className="actions">
-        <button type="button" onClick={pingBackground}>
-          Ping
+      <header>
+        <div className="brand">Lingo</div>
+        <button
+          className="settings-button"
+          type="button"
+          title="Open settings"
+          aria-label="Open settings"
+          onClick={() => browser.runtime.openOptionsPage()}
+        >
+          ⚙
         </button>
-        <button type="button" onClick={() => browser.runtime.openOptionsPage()}>
-          Settings
-        </button>
+      </header>
+      <div className="page-status">
+        <span className={`status-dot status-${page.status}`} />
+        <span>{statusLabel(page)}</span>
       </div>
+      {page.status === 'idle' ? (
+        <button
+          className="primary-action"
+          type="button"
+          disabled={busy || !settings.enabled || Boolean(error)}
+          onClick={() =>
+            runCommand('startPageTranslation', {
+              targetLanguage: 'zh-CN',
+              displayMode: 'bilingual',
+            })
+          }
+        >
+          {busy ? 'Translating…' : 'Translate page'}
+        </button>
+      ) : (
+        <button
+          className="restore-action"
+          type="button"
+          disabled={busy}
+          onClick={() => runCommand('stopPageTranslation', {})}
+        >
+          Show original
+        </button>
+      )}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </main>
   );
+}
+
+type PageMessageName = Exclude<keyof ExtensionMessages, 'ping'>;
+
+async function sendToActiveTab<TName extends PageMessageName>(
+  type: TName,
+  payload: ExtensionMessages[TName]['request'],
+): Promise<ExtensionMessages[TName]['response']> {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id === undefined) throw new Error('No active tab.');
+  return browser.tabs.sendMessage(tab.id, createMessage(type, payload));
+}
+
+function statusLabel(snapshot: SessionSnapshot): string {
+  if (snapshot.status === 'translating') return 'Translating page';
+  if (snapshot.status === 'translated') {
+    return `${snapshot.translatedUnitCount} paragraphs translated`;
+  }
+  return 'Ready to translate';
 }
 
 export default App;
