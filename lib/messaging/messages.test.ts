@@ -28,13 +28,23 @@ describe('messages', () => {
   });
 
   it('validates provider configuration commands', () => {
-    expect(isExtensionMessage({
-      type: 'saveProviderProfile',
-      payload: {
-        profile: { id: 'work', name: 'Work', provider: 'deepl' },
-        credential: 'secret',
-      },
-    })).toBe(true);
-    expect(isExtensionMessage({ type: 'testProviderConnection', payload: { profile: { id: 'work', name: 'Work', provider: 'deepl' }, credential: 'secret' } })).toBe(true);
+    expect(
+      isExtensionMessage({
+        type: 'saveProviderProfile',
+        payload: {
+          profile: { id: 'work', name: 'Work', provider: 'deepl' },
+          credential: 'secret',
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isExtensionMessage({
+        type: 'testProviderConnection',
+        payload: {
+          profile: { id: 'work', name: 'Work', provider: 'deepl' },
+          credential: 'secret',
+        },
+      }),
+    ).toBe(true);
   });
 });

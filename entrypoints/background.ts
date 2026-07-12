@@ -4,7 +4,11 @@ import {
   serveTranslationPort,
   TRANSLATION_PORT_NAME,
 } from '@/lib/messaging/translation-port';
-import { activeProvider, saveProviderProfile, testProviderProfile } from '@/lib/providers/provider-service';
+import {
+  activeProvider,
+  saveProviderProfile,
+  testProviderProfile,
+} from '@/lib/providers/provider-service';
 import { createTranslationOrchestrator } from '@/lib/translation/orchestrator';
 
 export default defineBackground(() => {
@@ -32,14 +36,20 @@ export default defineBackground(() => {
 
     if (message.type === 'saveProviderProfile') {
       return (async () => {
-        await saveProviderProfile(message.payload.profile, message.payload.credential);
+        await saveProviderProfile(
+          message.payload.profile,
+          message.payload.credential,
+        );
         return { ok: true as const };
       })();
     }
 
     if (message.type === 'testProviderConnection') {
       return (async () => {
-        return testProviderProfile(message.payload.profile, message.payload.credential);
+        return testProviderProfile(
+          message.payload.profile,
+          message.payload.credential,
+        );
       })();
     }
 

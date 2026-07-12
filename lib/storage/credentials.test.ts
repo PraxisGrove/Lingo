@@ -6,7 +6,9 @@ describe('credential store', () => {
     let values: Record<string, string> = {};
     const store = createCredentialStore({
       getValue: async () => values,
-      setValue: async (next) => { values = next; },
+      setValue: async (next) => {
+        values = next;
+      },
     });
     await store.set('work', 'secret');
     expect(await store.get('work')).toBe('secret');

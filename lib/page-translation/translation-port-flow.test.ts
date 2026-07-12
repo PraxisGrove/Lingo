@@ -79,6 +79,7 @@ function createPortPair(
     },
     onDisconnect: {
       addListener: (listener) => disconnectListeners.add(listener),
+      removeListener: (listener) => disconnectListeners.delete(listener),
     },
     postMessage(message) {
       if (disconnected) throw new Error('Port disconnected.');

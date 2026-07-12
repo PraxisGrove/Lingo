@@ -7,8 +7,23 @@ export const PROVIDER_DEFINITIONS: Array<{
   fields: ProviderField[];
   maxBatchSize: number;
 }> = [
-  { value: 'openai-compatible', label: 'OpenAI-compatible', fields: ['endpoint', 'model'], maxBatchSize: 50 },
+  {
+    value: 'openai-compatible',
+    label: 'OpenAI-compatible',
+    fields: ['endpoint', 'model'],
+    maxBatchSize: 50,
+  },
   { value: 'deepl', label: 'DeepL', fields: ['endpoint'], maxBatchSize: 50 },
-  { value: 'google-cloud', label: 'Google Cloud Translation', fields: ['endpoint'], maxBatchSize: 100 },
-  { value: 'azure-translator', label: 'Azure Translator', fields: ['endpoint', 'region'], maxBatchSize: 100 },
+  {
+    value: 'google-cloud',
+    label: 'Google Cloud Translation',
+    fields: ['endpoint'],
+    maxBatchSize: 100,
+  },
+  {
+    value: 'azure-translator',
+    label: 'Azure Translator',
+    fields: ['endpoint', 'region'],
+    maxBatchSize: 100,
+  },
 ];

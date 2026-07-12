@@ -139,6 +139,7 @@ export type TranslationRuntimePort = {
   };
   onDisconnect: {
     addListener(listener: () => void): void;
+    removeListener(listener: () => void): void;
   };
   postMessage(message: unknown): void;
   disconnect(): void;
@@ -148,15 +149,46 @@ export function createTranslationPortClient(
   connect: () => TranslationRuntimePort = () =>
     browser.runtime.connect({ name: TRANSLATION_PORT_NAME }),
   createSessionId: () => string = () => crypto.randomUUID(),
+  getDisconnectError: () => string | undefined = () =>
+    browser.runtime.lastError?.message,
 ): TranslationPortClient {
   const port = connect();
+  let disconnected = false;
+  let disconnectReason: string | undefined;
+
+  const readDisconnectReason = () => {
+    disconnected = true;
+    disconnectReason = getDisconnectError();
+    port.onDisconnect.removeListener(readDisconnectReason);
+  };
+  port.onDisconnect.addListener(readDisconnectReason);
 
   return {
     translate(units, targetLanguage) {
+      if (disconnected) {
+        return Promise.reject(
+          disconnectError(
+            disconnectReason ?? 'The extension port disconnected.',
+          ),
+        );
+      }
       const sessionId = createSessionId();
 
       return new Promise((resolve, reject) => {
         const translations: TranslationUnit[] = [];
+
+        const cleanup = () => {
+          port.onMessage.removeListener(onMessage);
+          port.onDisconnect.removeListener(onDisconnect);
+        };
+
+        const onDisconnect = () => {
+          disconnected = true;
+          const reason = getDisconnectError();
+          disconnectReason = reason ?? 'The extension port disconnected.';
+          cleanup();
+          reject(disconnectError(disconnectReason));
+        };
 
         const onMessage = (message: unknown) => {
           if (!isTranslationPortResponse(message)) return;
@@ -166,15 +198,16 @@ export function createTranslationPortClient(
           if (event.type === 'translated') {
             translations.push({ id: event.unitId, text: event.text });
           } else if (event.type === 'completed') {
-            port.onMessage.removeListener(onMessage);
+            cleanup();
             resolve(translations);
           } else if (event.type === 'paused') {
-            port.onMessage.removeListener(onMessage);
+            cleanup();
             reject(new Error(event.reason));
           }
         };
 
         port.onMessage.addListener(onMessage);
+        port.onDisconnect.addListener(onDisconnect);
         port.postMessage({
           type: 'translate',
           request: {
@@ -188,9 +221,14 @@ export function createTranslationPortClient(
       });
     },
     disconnect() {
+      port.onDisconnect.removeListener(readDisconnectReason);
       port.disconnect();
     },
   };
+}
+
+function disconnectError(reason: string): Error {
+  return new Error(`Translation connection closed: ${reason}`);
 }
 
 export function serveTranslationPort(

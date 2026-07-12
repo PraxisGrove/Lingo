@@ -7,7 +7,9 @@ describe('resolveSettings', () => {
   });
 
   it('keeps valid settings', () => {
-    expect(resolveSettings({ schemaVersion: 2, enabled: false, theme: 'dark' })).toEqual({
+    expect(
+      resolveSettings({ schemaVersion: 2, enabled: false, theme: 'dark' }),
+    ).toEqual({
       ...DEFAULT_SETTINGS,
       enabled: false,
       theme: 'dark',

@@ -106,14 +106,16 @@ function resolveProviderProfile(value: unknown): ProviderProfile[] {
     return [];
   }
 
-  return [{
-    id: profile.id,
-    name: profile.name,
-    provider: profile.provider as ProviderKind,
-    ...optionalString(profile, 'endpoint'),
-    ...optionalString(profile, 'model'),
-    ...optionalString(profile, 'region'),
-  }];
+  return [
+    {
+      id: profile.id,
+      name: profile.name,
+      provider: profile.provider as ProviderKind,
+      ...optionalString(profile, 'endpoint'),
+      ...optionalString(profile, 'model'),
+      ...optionalString(profile, 'region'),
+    },
+  ];
 }
 
 function optionalString(
@@ -126,7 +128,8 @@ function optionalString(
 }
 
 function validLanguage(value: unknown, fallback: string): string {
-  return typeof value === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(value)
+  return typeof value === 'string' &&
+    /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(value)
     ? value
     : fallback;
 }

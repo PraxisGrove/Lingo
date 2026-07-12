@@ -98,7 +98,10 @@ function App() {
   );
 }
 
-type PageMessageName = 'getPageTranslation' | 'startPageTranslation' | 'stopPageTranslation';
+type PageMessageName =
+  | 'getPageTranslation'
+  | 'startPageTranslation'
+  | 'stopPageTranslation';
 
 async function sendToActiveTab<TName extends PageMessageName>(
   type: TName,
