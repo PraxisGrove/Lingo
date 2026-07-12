@@ -1,5 +1,6 @@
 import { isExtensionMessage } from '@/lib/messaging/messages';
 import { createTranslationPortClient } from '@/lib/messaging/translation-port';
+import { startAutomaticTranslation } from '@/lib/page-translation/automatic-session';
 import { createPageTranslation } from '@/lib/page-translation/page-translation';
 import './page-translation.css';
 
@@ -12,6 +13,10 @@ export default defineContentScript({
       document,
       translate: client.translate,
     });
+
+    void startAutomaticTranslation(pageTranslation, document).catch(
+      () => undefined,
+    );
 
     browser.runtime.onMessage.addListener((message) => {
       if (!isExtensionMessage(message)) return undefined;

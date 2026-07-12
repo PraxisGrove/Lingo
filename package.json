@@ -18,7 +18,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "biome lint .",
-    "format": "biome format --write .",
+    "format": "biome check --write .",
     "check": "biome check .",
     "commitlint": "commitlint",
     "verify:commit": "pnpm lint && pnpm test && pnpm compile && pnpm check && pnpm build && pnpm build:firefox && git diff --check",

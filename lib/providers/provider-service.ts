@@ -1,5 +1,3 @@
-import { credentialStore } from '../storage/credentials';
-import { getSettings, setSettings } from '../storage/settings';
 import type {
   ExtensionSettings,
   ProviderProfile,
@@ -14,6 +12,10 @@ import { createProvider, ProviderError } from './provider';
 export async function translateWithActiveProvider(
   input: ProviderBatchInput,
 ): Promise<ProviderBatchResult> {
+  const [{ credentialStore }, { getSettings }] = await Promise.all([
+    import('../storage/credentials'),
+    import('../storage/settings'),
+  ]);
   const settings = await getSettings();
   const profile = settings.providerProfiles.find(
     (item) => item.id === settings.activeProviderProfileId,
@@ -32,13 +34,15 @@ export async function translateWithActiveProvider(
 }
 
 export async function getActiveProviderChain(): Promise<TranslationProvider[]> {
+  const { getSettings } = await import('../storage/settings');
   return createProviderChain(await getSettings());
 }
 
 export async function createProviderChain(
   settings: ExtensionSettings,
-  getCredential: (profileId: string) => Promise<string | null> = (profileId) =>
-    credentialStore.get(profileId),
+  getCredential: (profileId: string) => Promise<string | null> = async (
+    profileId,
+  ) => (await import('../storage/credentials')).credentialStore.get(profileId),
 ): Promise<TranslationProvider[]> {
   const profileIds = [
     settings.activeProviderProfileId,
@@ -91,6 +95,9 @@ export async function saveProviderProfile(
   profile: ProviderProfile,
   credential: string,
 ): Promise<void> {
+  const [{ credentialStore }, { getSettings, setSettings }] = await Promise.all(
+    [import('../storage/credentials'), import('../storage/settings')],
+  );
   const settings = await getSettings();
   const profiles = settings.providerProfiles.filter(
     (item) => item.id !== profile.id,

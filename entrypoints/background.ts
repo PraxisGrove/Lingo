@@ -1,8 +1,8 @@
-import { createLogger } from '@/lib/logger/logger';
 import {
   createConditionalTranslationCache,
   createTranslationCache,
 } from '@/lib/cache/translation-cache';
+import { createLogger } from '@/lib/logger/logger';
 import { isExtensionMessage } from '@/lib/messaging/messages';
 import {
   serveTranslationPort,

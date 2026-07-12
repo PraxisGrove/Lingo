@@ -1,10 +1,10 @@
+import type { TranslationCache } from '../cache/translation-cache';
 import type {
   TranslationEvent,
   TranslationOrchestrator,
   TranslationRequest,
   TranslationUnit,
 } from './types';
-import type { TranslationCache } from '../cache/translation-cache';
 
 export type ProviderBatchInput = {
   sourceLanguage: string;

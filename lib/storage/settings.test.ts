@@ -67,6 +67,39 @@ describe('resolveSettings', () => {
     ).toMatchObject({ fallbackProviderProfileIds: ['fallback'] });
   });
 
+  it('migrates valid automatic translation preferences and drops invalid language policies', () => {
+    expect(
+      resolveSettings({
+        autoTranslation: {
+          enabled: false,
+          defaultAutoSitesEnabled: false,
+          sourceLanguagePolicy: {
+            mode: 'excluded',
+            languages: ['en', 'zh-CN'],
+          },
+        },
+      }),
+    ).toMatchObject({
+      autoTranslation: {
+        enabled: false,
+        defaultAutoSitesEnabled: false,
+        sourceLanguagePolicy: { mode: 'excluded', languages: ['en', 'zh-CN'] },
+      },
+    });
+    expect(
+      resolveSettings({
+        autoTranslation: {
+          sourceLanguagePolicy: {
+            mode: 'unknown',
+            languages: ['not a language'],
+          },
+        },
+      }),
+    ).toMatchObject({
+      autoTranslation: DEFAULT_SETTINGS.autoTranslation,
+    });
+  });
+
   it('drops invalid profiles and an unknown active profile', () => {
     expect(
       resolveSettings({

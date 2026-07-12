@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createTranslationCache } from '../cache/translation-cache';
-import { createTranslationOrchestrator } from './orchestrator';
+import {
+  createTranslationOrchestrator,
+  type ProviderBatchInput,
+  type ProviderBatchResult,
+  type TranslationProvider,
+} from './orchestrator';
 
 describe('TranslationOrchestrator', () => {
   it('emits a translated result for every queued unit', async () => {
@@ -12,7 +17,7 @@ describe('TranslationOrchestrator', () => {
         supportsStructuredOutput: false,
         supportsStreaming: false,
       },
-      async translateBatch(input) {
+      async translateBatch(input: ProviderBatchInput) {
         return input.units.map((unit) => ({
           id: unit.id,
           text: `Chinese: ${unit.text}`,
@@ -64,7 +69,7 @@ describe('TranslationOrchestrator', () => {
         supportsStructuredOutput: false,
         supportsStreaming: false,
       },
-      async translateBatch(input) {
+      async translateBatch(input: ProviderBatchInput) {
         batchSizes.push(input.units.length);
         return input.units;
       },
@@ -89,19 +94,31 @@ describe('TranslationOrchestrator', () => {
 
   it('does not send a later batch after cancellation', async () => {
     const requestedUnits: string[] = [];
-    const orchestrator = createTranslationOrchestrator({
-      capabilities: {
-        maxBatchSize: 1,
-        supportsContext: false,
-        supportsNativeGlossary: false,
-        supportsStructuredOutput: false,
-        supportsStreaming: false,
-      },
-      async translateBatch(input) {
-        requestedUnits.push(...input.units.map((unit) => unit.id));
-        return input.units;
-      },
+    let releaseFirstBatch: (() => void) | undefined;
+    let markFirstBatchStarted: (() => void) | undefined;
+    const firstBatchStarted = new Promise<void>((resolve) => {
+      markFirstBatchStarted = resolve;
     });
+    const orchestrator = createTranslationOrchestrator(
+      {
+        capabilities: {
+          maxBatchSize: 1,
+          supportsContext: false,
+          supportsNativeGlossary: false,
+          supportsStructuredOutput: false,
+          supportsStreaming: false,
+        },
+        async translateBatch(input: ProviderBatchInput) {
+          requestedUnits.push(...input.units.map((unit) => unit.id));
+          markFirstBatchStarted?.();
+          await new Promise<void>((resolve) => {
+            releaseFirstBatch = resolve;
+          });
+          return input.units;
+        },
+      },
+      { maxConcurrentBatches: 1 },
+    );
     const events = orchestrator
       .translate({
         sessionId: 'session-to-cancel',
@@ -117,9 +134,11 @@ describe('TranslationOrchestrator', () => {
 
     await events.next();
     await events.next();
-    await events.next();
+    const result = events.next();
+    await firstBatchStarted;
     await orchestrator.cancel('session-to-cancel');
-    expect(await events.next()).toMatchObject({ done: true });
+    releaseFirstBatch?.();
+    expect(await result).toMatchObject({ done: true });
     expect(requestedUnits).toEqual(['1']);
   });
 
@@ -127,7 +146,7 @@ describe('TranslationOrchestrator', () => {
     let attempts = 0;
     const waits: number[] = [];
     const orchestrator = createTranslationOrchestrator(
-      provider(async (input) => {
+      provider(async (input: ProviderBatchInput) => {
         attempts += 1;
         if (attempts === 1) throw { category: 'rate-limit' };
         return input.units;
@@ -147,7 +166,12 @@ describe('TranslationOrchestrator', () => {
         throw { category: 'authentication' };
       }, 'primary'),
       {
-        fallbackProviders: [provider(async (input) => input.units, 'fallback')],
+        fallbackProviders: [
+          provider(
+            async (input: ProviderBatchInput) => input.units,
+            'fallback',
+          ),
+        ],
       },
     );
 
@@ -177,7 +201,7 @@ describe('TranslationOrchestrator', () => {
       clear: async () => void entries.clear(),
     });
     const orchestrator = createTranslationOrchestrator(
-      provider(async (input) => {
+      provider(async (input: ProviderBatchInput) => {
         requests += 1;
         return input.units.map((unit) => ({
           ...unit,
@@ -197,11 +221,9 @@ describe('TranslationOrchestrator', () => {
 });
 
 function provider(
-  translateBatch: Parameters<
-    typeof createTranslationOrchestrator
-  >[0]['translateBatch'],
+  translateBatch: (input: ProviderBatchInput) => Promise<ProviderBatchResult>,
   id = 'provider',
-) {
+): TranslationProvider {
   return {
     id,
     capabilities: {

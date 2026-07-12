@@ -46,6 +46,9 @@ Run `pnpm test` before opening a PR. For changes that affect browser packaging o
 
 Existing commit messages use concise imperative summaries, for example `Add scoped extension logger` and `Use latest GitHub Actions majors`. Follow that style.
 
+Every commit must pass the complete Lefthook `pre-commit` workflow. Do not use
+`git commit --no-verify`; resolve failing checks before committing.
+
 Pull requests should include a short description, validation commands run, and screenshots for popup or options UI changes. Call out any permission, host match, manifest, storage, or release workflow changes explicitly.
 
 ## Security & Configuration Tips

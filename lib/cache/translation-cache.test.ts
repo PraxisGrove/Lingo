@@ -6,12 +6,11 @@ type Entry = { key: string; text: string; size: number; accessedAt: number };
 function createStore() {
   const entries = new Map<string, Entry>();
   return {
-    entries,
     get: async (key: string) => entries.get(key),
-    put: async (entry: Entry) => entries.set(entry.key, entry),
+    put: async (entry: Entry) => void entries.set(entry.key, entry),
     entries: async () => [...entries.values()],
-    delete: async (key: string) => entries.delete(key),
-    clear: async () => entries.clear(),
+    delete: async (key: string) => void entries.delete(key),
+    clear: async () => void entries.clear(),
   };
 }
 

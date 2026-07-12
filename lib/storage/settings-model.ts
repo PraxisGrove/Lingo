@@ -1,6 +1,11 @@
+import type {
+  AutoTranslationPreferences,
+  SourceLanguagePolicy,
+} from '@/lib/preferences/preference-resolver';
+
 export type ExtensionTheme = 'system' | 'light' | 'dark';
 
-export const CURRENT_SETTINGS_SCHEMA_VERSION = 3 as const;
+export const CURRENT_SETTINGS_SCHEMA_VERSION = 4 as const;
 
 export type ProviderKind =
   | 'openai-compatible'
@@ -27,6 +32,7 @@ export type ExtensionSettings = {
   activeProviderProfileId: string | null;
   fallbackProviderProfileIds: string[];
   translationCacheEnabled: boolean;
+  autoTranslation: AutoTranslationPreferences;
   setupCompleted: boolean;
 };
 
@@ -40,6 +46,11 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   activeProviderProfileId: null,
   fallbackProviderProfileIds: [],
   translationCacheEnabled: true,
+  autoTranslation: {
+    enabled: true,
+    defaultAutoSitesEnabled: true,
+    sourceLanguagePolicy: { mode: 'all', languages: [] },
+  },
   setupCompleted: false,
 };
 
@@ -55,6 +66,7 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
     candidate.schemaVersion !== undefined &&
     candidate.schemaVersion !== 1 &&
     candidate.schemaVersion !== 2 &&
+    candidate.schemaVersion !== 3 &&
     candidate.schemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION
   ) {
     return DEFAULT_SETTINGS;
@@ -101,8 +113,46 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
       typeof candidate.translationCacheEnabled === 'boolean'
         ? candidate.translationCacheEnabled
         : DEFAULT_SETTINGS.translationCacheEnabled,
+    autoTranslation: resolveAutoTranslation(candidate.autoTranslation),
     setupCompleted: candidate.setupCompleted === true,
   };
+}
+
+function resolveAutoTranslation(value: unknown): AutoTranslationPreferences {
+  if (value == null || typeof value !== 'object') {
+    return DEFAULT_SETTINGS.autoTranslation;
+  }
+  const candidate = value as Record<string, unknown>;
+  return {
+    enabled:
+      typeof candidate.enabled === 'boolean'
+        ? candidate.enabled
+        : DEFAULT_SETTINGS.autoTranslation.enabled,
+    defaultAutoSitesEnabled:
+      typeof candidate.defaultAutoSitesEnabled === 'boolean'
+        ? candidate.defaultAutoSitesEnabled
+        : DEFAULT_SETTINGS.autoTranslation.defaultAutoSitesEnabled,
+    sourceLanguagePolicy: resolveSourceLanguagePolicy(
+      candidate.sourceLanguagePolicy,
+    ),
+  };
+}
+
+function resolveSourceLanguagePolicy(value: unknown): SourceLanguagePolicy {
+  if (value == null || typeof value !== 'object') {
+    return DEFAULT_SETTINGS.autoTranslation.sourceLanguagePolicy;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    (candidate.mode !== 'all' &&
+      candidate.mode !== 'included' &&
+      candidate.mode !== 'excluded') ||
+    !Array.isArray(candidate.languages) ||
+    candidate.languages.some((language) => !validLanguage(language, ''))
+  ) {
+    return DEFAULT_SETTINGS.autoTranslation.sourceLanguagePolicy;
+  }
+  return { mode: candidate.mode, languages: candidate.languages };
 }
 
 const PROVIDER_KINDS: ProviderKind[] = [
