@@ -199,6 +199,38 @@ describe('translation port protocol', () => {
     );
   });
 
+  it('rejects the request when reading the disconnect reason throws', async () => {
+    const disconnectListeners = new Set<() => void>();
+    const port: TranslationRuntimePort = {
+      name: TRANSLATION_PORT_NAME,
+      onMessage: { addListener() {}, removeListener() {} },
+      onDisconnect: {
+        addListener: (listener) => disconnectListeners.add(listener),
+        removeListener: (listener) => disconnectListeners.delete(listener),
+      },
+      postMessage() {},
+      disconnect() {},
+    };
+    const client = createTranslationPortClient(
+      () => port,
+      () => 'session-1',
+      () => {
+        throw new Error('Extension context invalidated.');
+      },
+    );
+    const translation = client.translate(
+      [{ id: 'paragraph-1', number: 1, text: 'Hello' }],
+      'zh-CN',
+    );
+
+    expect(() => {
+      for (const listener of [...disconnectListeners]) listener();
+    }).not.toThrow();
+    await expect(translation).rejects.toThrow(
+      'Translation connection closed: Extension context invalidated.',
+    );
+  });
+
   it('rejects completed requests that contain categorized failures', async () => {
     const client = createTranslationPortClient(
       createFailedPort,

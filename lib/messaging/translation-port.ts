@@ -222,21 +222,28 @@ export function createTranslationPortClient(
         };
 
         const onDisconnect = () => {
-          const reason = getDisconnectError();
-          const disconnectReason = reason ?? 'The extension port disconnected.';
-          cleanup();
-          if (port === listenerPort) port = undefined;
-          if (!closed && reconnectAttempts < 1) {
-            reconnectAttempts += 1;
-            try {
+          let disconnectReason = 'The extension port disconnected.';
+          try {
+            disconnectReason = getDisconnectError() ?? disconnectReason;
+            cleanup();
+            if (port === listenerPort) port = undefined;
+            if (!closed && reconnectAttempts < 1) {
+              reconnectAttempts += 1;
               start(ensurePort());
-            } catch (error) {
-              reject(
-                disconnectError(
-                  error instanceof Error ? error.message : disconnectReason,
-                ),
-              );
+              return;
             }
+          } catch (error) {
+            try {
+              cleanup();
+            } catch {
+              // Cleanup is best-effort after the extension context is gone.
+            }
+            if (port === listenerPort) port = undefined;
+            reject(
+              disconnectError(
+                error instanceof Error ? error.message : disconnectReason,
+              ),
+            );
             return;
           }
           reject(disconnectError(disconnectReason));
