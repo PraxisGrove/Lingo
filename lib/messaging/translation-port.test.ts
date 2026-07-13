@@ -8,8 +8,19 @@ import {
 } from './translation-port';
 
 describe('translation port protocol', () => {
-  it('accepts a versioned translation request without credentials', () => {
-    expect(TRANSLATION_PORT_NAME).toBe('lingo-translation-v1');
+  it('requires a stable paragraph number for every translation unit', () => {
+    expect(
+      isTranslationPortRequest({
+        type: 'translate',
+        request: {
+          sessionId: 'session-1',
+          pageRevision: 0,
+          sourceLanguage: 'auto',
+          targetLanguage: 'zh-CN',
+          units: [{ id: 'paragraph-1', number: 1, text: 'Hello world.' }],
+        },
+      }),
+    ).toBe(true);
     expect(
       isTranslationPortRequest({
         type: 'translate',
@@ -19,6 +30,22 @@ describe('translation port protocol', () => {
           sourceLanguage: 'auto',
           targetLanguage: 'zh-CN',
           units: [{ id: 'paragraph-1', text: 'Hello world.' }],
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('accepts a versioned translation request without credentials', () => {
+    expect(TRANSLATION_PORT_NAME).toBe('lingo-translation-v2');
+    expect(
+      isTranslationPortRequest({
+        type: 'translate',
+        request: {
+          sessionId: 'session-1',
+          pageRevision: 0,
+          sourceLanguage: 'auto',
+          targetLanguage: 'zh-CN',
+          units: [{ id: 'paragraph-1', number: 1, text: 'Hello world.' }],
         },
       }),
     ).toBe(true);
@@ -33,7 +60,7 @@ describe('translation port protocol', () => {
           pageRevision: 0,
           sourceLanguage: 'auto',
           targetLanguage: 'zh-CN',
-          units: [{ id: 'paragraph-1', text: 'Hello world.' }],
+          units: [{ id: 'paragraph-1', number: 1, text: 'Hello world.' }],
           credential: 'must-not-cross-the-port',
         },
       }),
@@ -90,7 +117,7 @@ describe('translation port protocol', () => {
     );
 
     const translation = client.translate(
-      [{ id: 'paragraph-1', text: 'Hello' }],
+      [{ id: 'paragraph-1', number: 1, text: 'Hello' }],
       'zh-CN',
     );
     for (const listener of disconnectListeners) listener();

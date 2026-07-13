@@ -1,6 +1,10 @@
 import type { ProviderKind } from '../storage/settings-model';
 
-export type ProviderField = 'endpoint' | 'model' | 'region';
+export type ProviderField =
+  | 'endpoint'
+  | 'model'
+  | 'region'
+  | 'nativeGlossaryId';
 export const PROVIDER_DEFINITIONS: Array<{
   value: ProviderKind;
   label: string;
@@ -13,7 +17,12 @@ export const PROVIDER_DEFINITIONS: Array<{
     fields: ['endpoint', 'model'],
     maxBatchSize: 50,
   },
-  { value: 'deepl', label: 'DeepL', fields: ['endpoint'], maxBatchSize: 50 },
+  {
+    value: 'deepl',
+    label: 'DeepL',
+    fields: ['endpoint', 'nativeGlossaryId'],
+    maxBatchSize: 50,
+  },
   {
     value: 'google-cloud',
     label: 'Google Cloud Translation',

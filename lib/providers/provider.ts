@@ -5,6 +5,10 @@ import type {
   ProviderCapabilities,
   TranslationProvider,
 } from '../translation/orchestrator';
+import {
+  instructionForQuality,
+  resolveTranslationQuality,
+} from '../translation/quality';
 import { PROVIDER_DEFINITIONS } from './config';
 
 export type ProviderErrorCategory =
@@ -57,6 +61,7 @@ export function createProvider(
   const capabilities = {
     ...BASE_CAPABILITIES,
     maxBatchSize: definition?.maxBatchSize ?? BASE_CAPABILITIES.maxBatchSize,
+    supportsContext: profile.provider === 'openai-compatible',
     supportsStructuredOutput: profile.provider === 'openai-compatible',
     supportsNativeGlossary: profile.provider === 'deepl',
   };
@@ -66,13 +71,14 @@ export function createProvider(
       translate(profile, credential, endpoint, input, fetcher),
     async testConnection() {
       await translate(
-        profile,
+        { ...profile, nativeGlossaryId: undefined },
         credential,
         endpoint,
         {
           sourceLanguage: 'auto',
           targetLanguage: 'es',
-          units: [{ id: 'connection-test', text: 'Hello' }],
+          quality: resolveTranslationQuality(),
+          units: [{ id: 'connection-test', number: 1, text: 'Hello' }],
         },
         fetcher,
       );
@@ -135,7 +141,7 @@ function buildRequest(
         messages: [
           {
             role: 'system',
-            content: `Translate to ${input.targetLanguage}. Return JSON translations with id and text.`,
+            content: structuredInstruction(input),
           },
           { role: 'user', content: JSON.stringify(input.units) },
         ],
@@ -150,6 +156,9 @@ function buildRequest(
         ...(input.sourceLanguage === 'auto'
           ? {}
           : { source_lang: input.sourceLanguage }),
+        ...(profile.nativeGlossaryId
+          ? { glossary_id: profile.nativeGlossaryId }
+          : {}),
       };
       break;
     case 'google-cloud':
@@ -183,8 +192,7 @@ function parseResponse(
       const content = (
         data as { choices: Array<{ message: { content: string } }> }
       ).choices[0].message.content;
-      return (JSON.parse(content) as { translations: ProviderBatchResult })
-        .translations;
+      return parseStructuredTranslations(content);
     }
     if (kind === 'deepl')
       return (
@@ -209,6 +217,67 @@ function parseResponse(
       'The translation service response did not match its contract.',
     );
   }
+}
+
+function structuredInstruction(input: ProviderBatchInput): string {
+  const parts = [
+    `Translate to ${input.targetLanguage}.`,
+    instructionForQuality(input.quality),
+    'Return a JSON object with a translations array. Each item must contain the supplied stable id and its translated text.',
+  ];
+  if (input.quality.glossary.length > 0) {
+    parts.push(
+      `Use these required terminology mappings: ${JSON.stringify(input.quality.glossary)}.`,
+    );
+  }
+  if (input.context) {
+    if (input.context.pageTitle)
+      parts.push(`Page title for context only: ${input.context.pageTitle}`);
+    if (input.context.units.length > 0)
+      parts.push(
+        `Adjacent paragraphs for context only: ${JSON.stringify(input.context.units)}.`,
+      );
+  }
+  return parts.join(' ');
+}
+
+function parseStructuredTranslations(content: string): ProviderBatchResult {
+  try {
+    const parsed = JSON.parse(repairJson(content)) as {
+      translations?: unknown;
+    };
+    if (!Array.isArray(parsed.translations))
+      throw new Error('Missing translations.');
+    return parsed.translations.map((item) => {
+      if (
+        typeof item !== 'object' ||
+        item === null ||
+        typeof (item as { id?: unknown }).id !== 'string' ||
+        typeof (item as { text?: unknown }).text !== 'string'
+      ) {
+        throw new Error('Malformed translation.');
+      }
+      const { id, text } = item as { id: string; text: string };
+      return { id, text };
+    });
+  } catch {
+    throw new ProviderError(
+      'invalid-response',
+      'The translation service response did not match its contract.',
+    );
+  }
+}
+
+function repairJson(content: string): string {
+  const withoutFence = content
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '');
+  const start = withoutFence.indexOf('{');
+  const end = withoutFence.lastIndexOf('}');
+  return start >= 0 && end >= start
+    ? withoutFence.slice(start, end + 1)
+    : withoutFence;
 }
 
 function resolveEndpoint(profile: ProviderProfile): string {

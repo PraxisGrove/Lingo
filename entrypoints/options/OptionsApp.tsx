@@ -21,6 +21,7 @@ const FIELD_LABELS = {
   endpoint: 'API endpoint (optional)',
   model: 'Model',
   region: 'Region',
+  nativeGlossaryId: 'DeepL glossary ID (optional)',
 };
 
 function OptionsApp() {
@@ -34,12 +35,16 @@ function OptionsApp() {
   const [credential, setCredential] = useState('');
   const [status, setStatus] = useState('');
   const [userRules, setUserRules] = useState('');
+  const [glossaryText, setGlossaryText] = useState('');
   const [ruleStatus, setRuleStatus] = useState('');
   const [communityUpdatesEnabled, setCommunityUpdatesEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void getSettings().then(setSettingsState);
+    void getSettings().then((loadedSettings) => {
+      setSettingsState(loadedSettings);
+      setGlossaryText(formatGlossary(loadedSettings));
+    });
     void userRuleStore
       .export()
       .then(setUserRules)
@@ -47,7 +52,10 @@ function OptionsApp() {
     void communityRuleStore
       .get()
       .then((state) => setCommunityUpdatesEnabled(state.updatesEnabled));
-    return watchSettings(setSettingsState);
+    return watchSettings((nextSettings) => {
+      setSettingsState(nextSettings);
+      setGlossaryText(formatGlossary(nextSettings));
+    });
   }, []);
 
   async function updateSettings(
@@ -310,6 +318,64 @@ function OptionsApp() {
           </p>
         </div>
       </section>
+      <section className="panel" aria-labelledby="translation-quality-heading">
+        <h2 id="translation-quality-heading">Translation quality</h2>
+        <label className="row">
+          <span>
+            <strong>Instruction template</strong>
+            <small>Sets the default style for translated paragraphs.</small>
+          </span>
+          <select
+            value={settings.translationQuality.template}
+            onChange={(event) =>
+              void updateSettings({
+                translationQuality: {
+                  ...settings.translationQuality,
+                  template: event.currentTarget.value as
+                    | 'faithful'
+                    | 'natural'
+                    | 'concise',
+                },
+              })
+            }
+          >
+            <option value="faithful">Faithful</option>
+            <option value="natural">Natural</option>
+            <option value="concise">Concise</option>
+          </select>
+        </label>
+        <label>
+          Additional translation instruction
+          <textarea
+            value={settings.translationQuality.instruction}
+            onChange={(event) =>
+              void updateSettings({
+                translationQuality: {
+                  ...settings.translationQuality,
+                  instruction: event.currentTarget.value,
+                },
+              })
+            }
+          />
+        </label>
+        <label>
+          Glossary
+          <textarea
+            aria-label="Glossary"
+            placeholder="Lingo => Lingo"
+            value={glossaryText}
+            onChange={(event) => setGlossaryText(event.currentTarget.value)}
+            onBlur={(event) =>
+              void updateSettings({
+                translationQuality: {
+                  ...settings.translationQuality,
+                  glossary: parseGlossary(event.currentTarget.value),
+                },
+              })
+            }
+          />
+        </label>
+      </section>
       <section
         className="panel provider-panel"
         aria-labelledby="provider-heading"
@@ -507,6 +573,21 @@ function OptionsApp() {
       </section>
     </main>
   );
+}
+
+function formatGlossary(settings: ExtensionSettings): string {
+  return settings.translationQuality.glossary
+    .map((entry) => `${entry.source} => ${entry.target}`)
+    .join('\n');
+}
+
+function parseGlossary(value: string) {
+  return value.split('\n').flatMap((line) => {
+    const [source, ...target] = line.split('=>');
+    return source && target.length > 0
+      ? [{ source, target: target.join('=>') }]
+      : [];
+  });
 }
 
 export default OptionsApp;

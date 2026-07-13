@@ -2,10 +2,15 @@ import type {
   AutoTranslationPreferences,
   SourceLanguagePolicy,
 } from '@/lib/preferences/preference-resolver';
+import {
+  DEFAULT_TRANSLATION_QUALITY,
+  resolveTranslationQuality,
+  type TranslationQualitySettings,
+} from '../translation/quality';
 
 export type ExtensionTheme = 'system' | 'light' | 'dark';
 
-export const CURRENT_SETTINGS_SCHEMA_VERSION = 4 as const;
+export const CURRENT_SETTINGS_SCHEMA_VERSION = 5 as const;
 
 export type ProviderKind =
   | 'openai-compatible'
@@ -20,6 +25,7 @@ export type ProviderProfile = {
   endpoint?: string;
   model?: string;
   region?: string;
+  nativeGlossaryId?: string;
 };
 
 export type ExtensionSettings = {
@@ -32,6 +38,7 @@ export type ExtensionSettings = {
   activeProviderProfileId: string | null;
   fallbackProviderProfileIds: string[];
   translationCacheEnabled: boolean;
+  translationQuality: TranslationQualitySettings;
   autoTranslation: AutoTranslationPreferences;
   setupCompleted: boolean;
 };
@@ -46,6 +53,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   activeProviderProfileId: null,
   fallbackProviderProfileIds: [],
   translationCacheEnabled: true,
+  translationQuality: DEFAULT_TRANSLATION_QUALITY,
   autoTranslation: {
     enabled: true,
     defaultAutoSitesEnabled: true,
@@ -67,6 +75,7 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
     candidate.schemaVersion !== 1 &&
     candidate.schemaVersion !== 2 &&
     candidate.schemaVersion !== 3 &&
+    candidate.schemaVersion !== 4 &&
     candidate.schemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION
   ) {
     return DEFAULT_SETTINGS;
@@ -113,9 +122,15 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
       typeof candidate.translationCacheEnabled === 'boolean'
         ? candidate.translationCacheEnabled
         : DEFAULT_SETTINGS.translationCacheEnabled,
+    translationQuality: resolveQualitySettings(candidate.translationQuality),
     autoTranslation: resolveAutoTranslation(candidate.autoTranslation),
     setupCompleted: candidate.setupCompleted === true,
   };
+}
+
+function resolveQualitySettings(value: unknown): TranslationQualitySettings {
+  const { version: _version, ...quality } = resolveTranslationQuality(value);
+  return quality;
 }
 
 function resolveAutoTranslation(value: unknown): AutoTranslationPreferences {
@@ -183,13 +198,14 @@ function resolveProviderProfile(value: unknown): ProviderProfile[] {
       ...optionalString(profile, 'endpoint'),
       ...optionalString(profile, 'model'),
       ...optionalString(profile, 'region'),
+      ...optionalString(profile, 'nativeGlossaryId'),
     },
   ];
 }
 
 function optionalString(
   value: Record<string, unknown>,
-  key: 'endpoint' | 'model' | 'region',
+  key: 'endpoint' | 'model' | 'region' | 'nativeGlossaryId',
 ): Partial<ProviderProfile> {
   return typeof value[key] === 'string' && value[key].length > 0
     ? { [key]: value[key] }

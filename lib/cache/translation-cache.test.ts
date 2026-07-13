@@ -22,6 +22,7 @@ describe('TranslationCache', () => {
         providerId: 'personal',
         sourceLanguage: 'en',
         targetLanguage: 'zh-CN',
+        qualityVersion: 'quality-v1:123',
         text: 'Hello',
       },
       '你好',
@@ -31,6 +32,7 @@ describe('TranslationCache', () => {
         providerId: 'work',
         sourceLanguage: 'en',
         targetLanguage: 'zh-CN',
+        qualityVersion: 'quality-v1:123',
         text: 'Hello',
       }),
     ).resolves.toBeUndefined();
@@ -39,6 +41,7 @@ describe('TranslationCache', () => {
         providerId: 'personal',
         sourceLanguage: 'en',
         targetLanguage: 'zh-CN',
+        qualityVersion: 'quality-v1:123',
         text: 'Hello',
       }),
     ).resolves.toBe('你好');
@@ -51,6 +54,7 @@ describe('TranslationCache', () => {
       providerId: 'p',
       sourceLanguage: 'en',
       targetLanguage: 'zh',
+      qualityVersion: 'quality-v1:123',
       text,
     });
     await cache.set(key('one'), 'a');

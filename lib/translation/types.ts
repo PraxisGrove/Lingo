@@ -1,5 +1,6 @@
 export type TranslationUnit = {
   id: string;
+  number: number;
   text: string;
 };
 
@@ -8,6 +9,7 @@ export type TranslationRequest = {
   pageRevision: number;
   sourceLanguage: string;
   targetLanguage: string;
+  pageTitle?: string;
   units: TranslationUnit[];
 };
 

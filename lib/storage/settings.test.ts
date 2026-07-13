@@ -100,6 +100,28 @@ describe('resolveSettings', () => {
     });
   });
 
+  it('normalizes saved translation quality settings', () => {
+    expect(
+      resolveSettings({
+        schemaVersion: 4,
+        translationQuality: {
+          template: 'concise',
+          instruction: '  For product managers. ',
+          glossary: [
+            { source: 'Lingo', target: '灵译' },
+            { source: '', target: 'ignored' },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      translationQuality: {
+        template: 'concise',
+        instruction: 'For product managers.',
+        glossary: [{ source: 'Lingo', target: '灵译' }],
+      },
+    });
+  });
+
   it('drops invalid profiles and an unknown active profile', () => {
     expect(
       resolveSettings({

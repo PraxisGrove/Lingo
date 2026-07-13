@@ -45,6 +45,7 @@ type PageTranslationDependencies = {
 type Candidate = {
   element: HTMLElement;
   id: string;
+  number: number;
   encodedText: string;
   inlineElements: Map<string, HTMLElement>;
 };
@@ -101,6 +102,7 @@ export function createPageTranslation({
 }: PageTranslationDependencies): PageTranslation {
   const listeners = new Set<(event: PageTranslationEvent) => void>();
   const unitIds = new WeakMap<HTMLElement, string>();
+  const unitNumbers = new WeakMap<HTMLElement, number>();
   let processed = new WeakSet<HTMLElement>();
   const insertedTranslations = new Map<HTMLElement, HTMLElement>();
   const pending = new Set<HTMLElement>();
@@ -147,7 +149,11 @@ export function createPageTranslation({
       intersectionObserver?.unobserve(candidate.element);
     }
     const translations = await translate(
-      candidates.map(({ id, encodedText }) => ({ id, text: encodedText })),
+      candidates.map(({ id, number, encodedText }) => ({
+        id,
+        number,
+        text: encodedText,
+      })),
       options.targetLanguage,
     );
     if (
@@ -179,17 +185,29 @@ export function createPageTranslation({
   }
 
   function createCandidate(element: HTMLElement): Candidate {
+    const { id, number } = assignUnitIdentity(element);
+    const { text, inlineElements } = encodeInlineContent(element);
+    return { element, id, number, encodedText: text, inlineElements };
+  }
+
+  function assignUnitIdentity(element: HTMLElement): {
+    id: string;
+    number: number;
+  } {
     let id = unitIds.get(element);
-    if (!id) {
+    let number = unitNumbers.get(element);
+    if (!id || number === undefined) {
       id = `paragraph-${nextUnitId}`;
+      number = nextUnitId;
       nextUnitId += 1;
       unitIds.set(element, id);
+      unitNumbers.set(element, number);
     }
-    const { text, inlineElements } = encodeInlineContent(element);
-    return { element, id, encodedText: text, inlineElements };
+    return { id, number };
   }
 
   function schedule(elements: HTMLElement[]) {
+    for (const element of elements) assignUnitIdentity(element);
     const fresh = elements.filter((element) => !processed.has(element));
     if (
       activeOptions?.translateImmediately !== false ||

@@ -5,7 +5,7 @@ import type {
   TranslationUnit,
 } from '@/lib/translation/types';
 
-export const TRANSLATION_PORT_NAME = 'lingo-translation-v1';
+export const TRANSLATION_PORT_NAME = 'lingo-translation-v2';
 
 export type TranslationPortRequest = {
   type: 'translate';
@@ -29,17 +29,23 @@ export function isTranslationPortRequest(
 
   const request = value.request;
   return (
-    isRecordWithKeys(request, [
-      'sessionId',
-      'pageRevision',
-      'sourceLanguage',
-      'targetLanguage',
-      'units',
-    ]) &&
+    isRecordWithOptionalKeys(
+      request,
+      [
+        'sessionId',
+        'pageRevision',
+        'sourceLanguage',
+        'targetLanguage',
+        'units',
+      ],
+      ['pageTitle'],
+    ) &&
     typeof request.sessionId === 'string' &&
     Number.isInteger(request.pageRevision) &&
     typeof request.sourceLanguage === 'string' &&
     typeof request.targetLanguage === 'string' &&
+    (request.pageTitle === undefined ||
+      typeof request.pageTitle === 'string') &&
     Array.isArray(request.units) &&
     request.units.every(isTranslationUnit)
   );
@@ -105,8 +111,10 @@ function isTranslationEvent(value: unknown): value is TranslationEvent {
 
 function isTranslationUnit(value: unknown): value is TranslationUnit {
   return (
-    isRecordWithKeys(value, ['id', 'text']) &&
+    isRecordWithKeys(value, ['id', 'number', 'text']) &&
     typeof value.id === 'string' &&
+    Number.isInteger(value.number) &&
+    (value.number as number) > 0 &&
     typeof value.text === 'string'
   );
 }
@@ -120,6 +128,21 @@ function isRecordWithKeys(
     value !== null &&
     Object.keys(value).length === keys.length &&
     keys.every((key) => key in value)
+  );
+}
+
+function isRecordWithOptionalKeys(
+  value: unknown,
+  requiredKeys: string[],
+  optionalKeys: string[],
+): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Object.keys(value).every((key) =>
+      [...requiredKeys, ...optionalKeys].includes(key),
+    ) &&
+    requiredKeys.every((key) => key in value)
   );
 }
 
@@ -151,6 +174,8 @@ export function createTranslationPortClient(
   createSessionId: () => string = () => crypto.randomUUID(),
   getDisconnectError: () => string | undefined = () =>
     browser.runtime.lastError?.message,
+  getPageTitle: () => string = () =>
+    typeof document === 'undefined' ? '' : document.title,
 ): TranslationPortClient {
   let port: TranslationRuntimePort | undefined;
   let disconnected = false;
@@ -204,7 +229,8 @@ export function createTranslationPortClient(
           if (event.sessionId !== sessionId || event.pageRevision !== 0) return;
 
           if (event.type === 'translated') {
-            translations.push({ id: event.unitId, text: event.text });
+            const unit = units.find((item) => item.id === event.unitId);
+            if (unit) translations.push({ ...unit, text: event.text });
           } else if (event.type === 'completed') {
             cleanup();
             resolve(translations);
@@ -225,6 +251,7 @@ export function createTranslationPortClient(
               pageRevision: 0,
               sourceLanguage: 'auto',
               targetLanguage,
+              pageTitle: getPageTitle(),
               units,
             },
           } satisfies TranslationPortRequest);

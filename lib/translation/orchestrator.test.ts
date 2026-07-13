@@ -6,6 +6,7 @@ import {
   type ProviderBatchResult,
   type TranslationProvider,
 } from './orchestrator';
+import { resolveTranslationQuality } from './quality';
 
 describe('TranslationOrchestrator', () => {
   it('emits a translated result for every queued unit', async () => {
@@ -31,7 +32,7 @@ describe('TranslationOrchestrator', () => {
       pageRevision: 0,
       sourceLanguage: 'auto',
       targetLanguage: 'zh-CN',
-      units: [{ id: 'paragraph-1', text: 'Hello world.' }],
+      units: [{ id: 'paragraph-1', number: 1, text: 'Hello world.' }],
     })) {
       events.push(event);
     }
@@ -81,9 +82,9 @@ describe('TranslationOrchestrator', () => {
       sourceLanguage: 'auto',
       targetLanguage: 'zh-CN',
       units: [
-        { id: '1', text: 'One' },
-        { id: '2', text: 'Two' },
-        { id: '3', text: 'Three' },
+        { id: '1', number: 1, text: 'One' },
+        { id: '2', number: 2, text: 'Two' },
+        { id: '3', number: 3, text: 'Three' },
       ],
     })) {
       // Consume the complete event stream.
@@ -126,8 +127,8 @@ describe('TranslationOrchestrator', () => {
         sourceLanguage: 'auto',
         targetLanguage: 'zh-CN',
         units: [
-          { id: '1', text: 'One' },
-          { id: '2', text: 'Two' },
+          { id: '1', number: 1, text: 'One' },
+          { id: '2', number: 2, text: 'Two' },
         ],
       })
       [Symbol.asyncIterator]();
@@ -218,6 +219,153 @@ describe('TranslationOrchestrator', () => {
       expect.objectContaining({ text: 'Cached: Hello' }),
     );
   });
+
+  it('sends a bounded title and adjacent paragraph context only to capable providers', async () => {
+    const contexts: ProviderBatchInput['context'][] = [];
+    const orchestrator = createTranslationOrchestrator(
+      {
+        ...provider(async (input) => input.units),
+        capabilities: {
+          ...provider(async (input) => input.units).capabilities,
+          maxBatchSize: 1,
+          supportsContext: true,
+        },
+        async translateBatch(input) {
+          contexts.push(input.context);
+          return input.units;
+        },
+      },
+      { maxConcurrentBatches: 1 },
+    );
+
+    for await (const _event of orchestrator.translate({
+      sessionId: 'context',
+      pageRevision: 0,
+      sourceLanguage: 'en',
+      targetLanguage: 'zh-CN',
+      pageTitle: 'A page title',
+      units: [
+        { id: '3', number: 3, text: 'Three' },
+        { id: '1', number: 1, text: 'One' },
+        { id: '2', number: 2, text: 'Two' },
+      ],
+    })) {
+      // Consume the complete event stream.
+    }
+
+    expect(contexts).toEqual([
+      {
+        pageTitle: 'A page title',
+        units: [{ id: '2', number: 2, text: 'Two' }],
+      },
+      {
+        pageTitle: 'A page title',
+        units: [{ id: '2', number: 2, text: 'Two' }],
+      },
+      {
+        pageTitle: 'A page title',
+        units: [
+          { id: '1', number: 1, text: 'One' },
+          { id: '3', number: 3, text: 'Three' },
+        ],
+      },
+    ]);
+  });
+
+  it('limits the text sent as adjacent paragraph context', async () => {
+    const contexts: ProviderBatchInput['context'][] = [];
+    const orchestrator = createTranslationOrchestrator({
+      ...provider(async (input) => input.units),
+      capabilities: {
+        ...provider(async (input) => input.units).capabilities,
+        maxBatchSize: 1,
+        supportsContext: true,
+      },
+      async translateBatch(input) {
+        contexts.push(input.context);
+        return input.units;
+      },
+    });
+
+    for await (const _event of orchestrator.translate({
+      sessionId: 'long-context',
+      pageRevision: 0,
+      sourceLanguage: 'en',
+      targetLanguage: 'zh-CN',
+      units: [
+        { id: '1', number: 1, text: 'One' },
+        { id: '2', number: 2, text: 'x'.repeat(1_000) },
+      ],
+    })) {
+      // Consume the complete event stream.
+    }
+
+    expect(contexts[0]?.units[0]?.text).toHaveLength(600);
+  });
+
+  it('rejects malformed per-paragraph results without caching them', async () => {
+    const orchestrator = createTranslationOrchestrator({
+      ...provider(async () => [
+        { id: '1', text: '' },
+        { id: '2', text: 'Two' },
+        { id: '2', text: 'Duplicate' },
+        { id: 'unknown', text: 'Unexpected' },
+      ]),
+    });
+
+    const events = [];
+    for await (const event of orchestrator.translate({
+      sessionId: 'validation',
+      pageRevision: 0,
+      sourceLanguage: 'en',
+      targetLanguage: 'zh-CN',
+      units: [
+        { id: '1', number: 1, text: 'One' },
+        { id: '2', number: 2, text: 'Two' },
+      ],
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'failed', unitId: '1' }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'failed', unitId: '2' }),
+    );
+  });
+
+  it('invalidates cached translations when quality constraints change', async () => {
+    let requests = 0;
+    const entries = new Map<
+      string,
+      { key: string; text: string; size: number; accessedAt: number }
+    >();
+    const cache = createTranslationCache({
+      get: async (key) => entries.get(key),
+      put: async (entry) => void entries.set(entry.key, entry),
+      entries: async () => [...entries.values()],
+      delete: async (key) => void entries.delete(key),
+      clear: async () => void entries.clear(),
+    });
+    let quality = resolveTranslationQuality({
+      glossary: [{ source: 'Lingo', target: '灵译' }],
+    });
+    const orchestrator = createTranslationOrchestrator(
+      provider(async (input) => {
+        requests += 1;
+        return input.units;
+      }),
+      { cache, quality: async () => quality },
+    );
+
+    await collect(orchestrator, 'quality-one');
+    quality = resolveTranslationQuality({
+      glossary: [{ source: 'Lingo', target: 'Lingo' }],
+    });
+    await collect(orchestrator, 'quality-two');
+    expect(requests).toBe(2);
+  });
 });
 
 function provider(
@@ -247,7 +395,7 @@ async function collect(
     pageRevision: 0,
     sourceLanguage: 'auto',
     targetLanguage: 'zh-CN',
-    units: [{ id: 'paragraph-1', text: 'Hello' }],
+    units: [{ id: 'paragraph-1', number: 1, text: 'Hello' }],
   }))
     events.push(event);
   return events;

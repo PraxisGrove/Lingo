@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProviderProfile } from '../storage/settings-model';
+import { resolveTranslationQuality } from '../translation/quality';
 import { createProvider, ProviderError } from './provider';
 
 const cases: Array<{
@@ -77,7 +78,8 @@ describe.each(cases)('$profile.provider provider contract', ({
       provider.translateBatch({
         sourceLanguage: 'auto',
         targetLanguage: 'es',
-        units: [{ id: '1', text: 'Hello' }],
+        quality: resolveTranslationQuality(),
+        units: [{ id: '1', number: 1, text: 'Hello' }],
       }),
     ).resolves.toEqual([{ id: '1', text: expectedText }]);
     expect(new URL(String(fetch.mock.calls[0]?.[0])).pathname).toBe(
@@ -87,6 +89,68 @@ describe.each(cases)('$profile.provider provider contract', ({
 });
 
 describe('provider errors', () => {
+  it('repairs fenced structured output and sends glossary constraints to compatible models', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  '```json\\n{"translations":[{"id":"1","text":"Hola"}]}\\n```',
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const provider = createProvider(cases[0].profile, 'secret', fetch);
+
+    await expect(
+      provider.translateBatch({
+        sourceLanguage: 'en',
+        targetLanguage: 'es',
+        quality: resolveTranslationQuality({
+          instruction: 'Use a friendly tone.',
+          glossary: [{ source: 'Lingo', target: 'Lingo' }],
+        }),
+        context: {
+          pageTitle: 'Welcome',
+          units: [{ id: '2', number: 2, text: 'Context.' }],
+        },
+        units: [{ id: '1', number: 1, text: 'Hello' }],
+      }),
+    ).resolves.toEqual([{ id: '1', text: 'Hola' }]);
+
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain('Lingo');
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain('Welcome');
+  });
+
+  it('passes a configured DeepL glossary ID through its native request field', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ translations: [{ text: 'Hallo' }] }), {
+        status: 200,
+      }),
+    );
+    const provider = createProvider(
+      { ...cases[1].profile, nativeGlossaryId: 'glossary-1' },
+      'secret',
+      fetch,
+    );
+
+    await provider.translateBatch({
+      sourceLanguage: 'en',
+      targetLanguage: 'de',
+      quality: resolveTranslationQuality(),
+      units: [{ id: '1', number: 1, text: 'Hello' }],
+    });
+
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain(
+      '"glossary_id":"glossary-1"',
+    );
+  });
+
   it.each([
     [401, 'authentication'],
     [429, 'rate-limit'],
@@ -102,7 +166,8 @@ describe('provider errors', () => {
       provider.translateBatch({
         sourceLanguage: 'auto',
         targetLanguage: 'es',
-        units: [{ id: '1', text: 'Hello' }],
+        quality: resolveTranslationQuality(),
+        units: [{ id: '1', number: 1, text: 'Hello' }],
       }),
     ).rejects.toMatchObject({ category });
   });

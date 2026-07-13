@@ -2,6 +2,7 @@ export type TranslationCacheKey = {
   providerId: string;
   sourceLanguage: string;
   targetLanguage: string;
+  qualityVersion: string;
   text: string;
 };
 
@@ -78,6 +79,7 @@ async function cacheKey(key: TranslationCacheKey): Promise<string> {
     key.providerId,
     key.sourceLanguage,
     key.targetLanguage,
+    key.qualityVersion,
     key.text,
   ]);
   const bytes = await crypto.subtle.digest(

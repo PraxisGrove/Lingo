@@ -15,6 +15,7 @@ import {
 } from '@/lib/providers/provider-service';
 import { getSettings } from '@/lib/storage/settings';
 import { createTranslationOrchestrator } from '@/lib/translation/orchestrator';
+import { resolveTranslationQuality } from '@/lib/translation/quality';
 
 export default defineBackground(() => {
   const logger = createLogger('background');
@@ -24,6 +25,8 @@ export default defineBackground(() => {
       translationCache,
       async () => (await getSettings()).translationCacheEnabled,
     ),
+    quality: async () =>
+      resolveTranslationQuality((await getSettings()).translationQuality),
   });
 
   logger.info('Background service worker started.');

@@ -1,4 +1,5 @@
 import type { TranslationCache } from '../cache/translation-cache';
+import { resolveTranslationQuality, type TranslationQuality } from './quality';
 import type {
   TranslationEvent,
   TranslationOrchestrator,
@@ -10,6 +11,11 @@ export type ProviderBatchInput = {
   sourceLanguage: string;
   targetLanguage: string;
   units: TranslationUnit[];
+  quality: TranslationQuality;
+  context?: {
+    pageTitle?: string;
+    units: TranslationUnit[];
+  };
 };
 
 export type ProviderBatchResult = Array<{
@@ -38,6 +44,7 @@ export type TranslationOrchestratorOptions = {
   timeoutMs?: number;
   maxAttempts?: number;
   wait?: (milliseconds: number) => Promise<void>;
+  quality?: () => Promise<TranslationQuality>;
 };
 
 export type TranslationProviderResolver = () => Promise<TranslationProvider[]>;
@@ -59,6 +66,9 @@ export function createTranslationOrchestrator(
       for (const unit of request.units) {
         yield eventForUnit(request, unit.id, 'queued');
       }
+      const quality = options.quality
+        ? await options.quality()
+        : resolveTranslationQuality();
 
       const outcomes = await translateUnits(
         request,
@@ -67,6 +77,7 @@ export function createTranslationOrchestrator(
           ...(options.fallbackProviders ?? []),
         ],
         options.cache,
+        quality,
         maxConcurrentBatches,
         maxAttempts,
         timeoutMs,
@@ -113,10 +124,13 @@ type Outcome =
   | { type: 'failed'; unitId: string; message: string }
   | { type: 'paused'; unitId: null; reason: string };
 
+const MAX_CONTEXT_UNIT_CHARACTERS = 600;
+
 async function translateUnits(
   request: TranslationRequest,
   providers: TranslationProvider[],
   cache: TranslationCache | undefined,
+  quality: TranslationQuality,
   maxConcurrentBatches: number,
   maxAttempts: number,
   timeoutMs: number,
@@ -134,6 +148,7 @@ async function translateUnits(
         providerId,
         sourceLanguage: request.sourceLanguage,
         targetLanguage: request.targetLanguage,
+        qualityVersion: quality.version,
         text: unit.text,
       });
       if (cached === undefined) unresolved.push(unit);
@@ -154,14 +169,13 @@ async function translateUnits(
             provider,
             request,
             units,
+            quality,
             maxAttempts,
             timeoutMs,
             wait,
             cancelled,
           );
-          const resultsById = new Map(
-            results.map((result) => [result.id, result.text]),
-          );
+          const resultsById = validatedResults(units, results);
           const found: Outcome[] = [];
           for (const unit of units) {
             const text = resultsById.get(unit.id);
@@ -177,6 +191,7 @@ async function translateUnits(
                   providerId,
                   sourceLanguage: request.sourceLanguage,
                   targetLanguage: request.targetLanguage,
+                  qualityVersion: quality.version,
                   text: unit.text,
                 },
                 text,
@@ -222,10 +237,35 @@ async function translateUnits(
   return outcomes;
 }
 
+function validatedResults(
+  units: TranslationUnit[],
+  results: ProviderBatchResult,
+): Map<string, string> {
+  const requestedIds = new Set(units.map((unit) => unit.id));
+  const valid = new Map<string, string>();
+  const invalidIds = new Set<string>();
+  for (const result of results) {
+    if (
+      !requestedIds.has(result.id) ||
+      typeof result.text !== 'string' ||
+      result.text.trim().length === 0 ||
+      valid.has(result.id) ||
+      invalidIds.has(result.id)
+    ) {
+      invalidIds.add(result.id);
+      valid.delete(result.id);
+      continue;
+    }
+    valid.set(result.id, result.text);
+  }
+  return valid;
+}
+
 async function attemptBatch(
   provider: TranslationProvider,
   request: TranslationRequest,
   units: TranslationUnit[],
+  quality: TranslationQuality,
   maxAttempts: number,
   timeoutMs: number,
   wait: (milliseconds: number) => Promise<void>,
@@ -240,6 +280,10 @@ async function attemptBatch(
           sourceLanguage: request.sourceLanguage,
           targetLanguage: request.targetLanguage,
           units,
+          quality,
+          ...(provider.capabilities.supportsContext
+            ? { context: contextFor(request, units) }
+            : {}),
         }),
         timeoutMs,
       );
@@ -250,6 +294,36 @@ async function attemptBatch(
     }
   }
   throw lastError;
+}
+
+function contextFor(
+  request: TranslationRequest,
+  units: TranslationUnit[],
+): { pageTitle?: string; units: TranslationUnit[] } {
+  const orderedUnits = [...request.units].sort(
+    (left, right) => left.number - right.number,
+  );
+  const requestedIds = new Set(units.map((unit) => unit.id));
+  const positions = units
+    .map((unit) => orderedUnits.findIndex((item) => item.id === unit.id))
+    .filter((index) => index >= 0);
+  const first = Math.min(...positions);
+  const last = Math.max(...positions);
+  const context = [orderedUnits[first - 1], orderedUnits[last + 1]]
+    .filter(
+      (unit): unit is TranslationUnit =>
+        unit !== undefined && !requestedIds.has(unit.id),
+    )
+    .map((unit) => ({
+      ...unit,
+      text: unit.text.slice(0, MAX_CONTEXT_UNIT_CHARACTERS),
+    }));
+  return {
+    ...(request.pageTitle?.trim()
+      ? { pageTitle: request.pageTitle.trim().slice(0, 200) }
+      : {}),
+    units: context,
+  };
 }
 
 function split<T>(items: T[], size: number): T[][] {

@@ -24,7 +24,8 @@ describe('static article translation flow', () => {
           units,
         })) {
           if (event.type === 'translated') {
-            translations.push({ id: event.unitId, text: event.text });
+            const unit = units.find((item) => item.id === event.unitId);
+            if (unit) translations.push({ ...unit, text: event.text });
           }
         }
         return translations;
