@@ -16,7 +16,7 @@ describe('resolvePopupNotice', () => {
   it('guides users to configure a service before translating', () => {
     expect(
       resolvePopupNotice(DEFAULT_SETTINGS, true, READY_PAGE),
-    ).toMatchObject({ kind: 'no-service', action: 'Open settings' });
+    ).toMatchObject({ kind: 'no-service', action: 'open-settings' });
   });
 
   it('distinguishes missing permission from an unsupported page', () => {
@@ -54,7 +54,8 @@ describe('resolvePopupNotice', () => {
       }),
     ).toMatchObject({
       kind: 'quota',
-      action: 'Review service',
+      action: 'review-service',
+      detail: 'Balance exhausted.',
     });
   });
 });

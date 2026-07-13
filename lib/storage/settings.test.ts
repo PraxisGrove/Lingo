@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS, resolveSettings } from './settings-model';
+import {
+  DEFAULT_SETTINGS,
+  resolveSettings,
+  targetLanguageForBrowser,
+} from './settings-model';
 
 describe('resolveSettings', () => {
   it('returns defaults for empty values', () => {
@@ -60,6 +64,29 @@ describe('resolveSettings', () => {
       setupCompleted: true,
       providerProfiles: [{ id: 'work', provider: 'azure-translator' }],
     });
+  });
+
+  it('migrates existing settings to automatic interface language without changing the translation target', () => {
+    expect(
+      resolveSettings({ schemaVersion: 7, targetLanguage: 'ja' }),
+    ).toMatchObject({ uiLocale: 'auto', targetLanguage: 'ja' });
+  });
+
+  it('keeps supported interface language preferences and rejects unknown ones', () => {
+    expect(resolveSettings({ uiLocale: 'pt-BR' })).toMatchObject({
+      uiLocale: 'pt-BR',
+    });
+    expect(resolveSettings({ uiLocale: 'it' })).toMatchObject({
+      uiLocale: 'auto',
+    });
+  });
+
+  it.each([
+    ['es-MX', 'es'],
+    ['zh_Hant', 'zh-TW'],
+    ['invalid locale', 'en'],
+  ])('initializes a new translation target from %s as %s', (locale, target) => {
+    expect(targetLanguageForBrowser(locale)).toBe(target);
   });
 
   it('keeps an ordered fallback chain without the active provider', () => {

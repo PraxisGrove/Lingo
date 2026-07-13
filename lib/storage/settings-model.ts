@@ -3,6 +3,11 @@ import type {
   SourceLanguagePolicy,
 } from '@/lib/preferences/preference-resolver';
 import {
+  resolveUiLocale,
+  SUPPORTED_UI_LOCALES,
+  type UiLocalePreference,
+} from '../i18n/locales';
+import {
   DEFAULT_TRANSLATION_QUALITY,
   type GlossaryEntry,
   resolveTranslationQuality,
@@ -11,7 +16,7 @@ import {
 
 export type ExtensionTheme = 'system' | 'light' | 'dark';
 
-export const CURRENT_SETTINGS_SCHEMA_VERSION = 7 as const;
+export const CURRENT_SETTINGS_SCHEMA_VERSION = 8 as const;
 
 export type ProviderKind =
   | 'openai-compatible'
@@ -33,6 +38,7 @@ export type ExtensionSettings = {
   schemaVersion: typeof CURRENT_SETTINGS_SCHEMA_VERSION;
   enabled: boolean;
   theme: ExtensionTheme;
+  uiLocale: UiLocalePreference;
   sourceLanguage: string;
   targetLanguage: string;
   providerProfiles: ProviderProfile[];
@@ -50,6 +56,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   schemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
   enabled: true,
   theme: 'system',
+  uiLocale: 'auto',
   sourceLanguage: 'auto',
   targetLanguage: 'zh-CN',
   providerProfiles: [],
@@ -83,6 +90,7 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
     candidate.schemaVersion !== 4 &&
     candidate.schemaVersion !== 5 &&
     candidate.schemaVersion !== 6 &&
+    candidate.schemaVersion !== 7 &&
     candidate.schemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION
   ) {
     return DEFAULT_SETTINGS;
@@ -107,6 +115,11 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
       THEMES.includes(candidate.theme as ExtensionTheme)
         ? (candidate.theme as ExtensionTheme)
         : DEFAULT_SETTINGS.theme,
+    uiLocale:
+      candidate.uiLocale === 'auto' ||
+      SUPPORTED_UI_LOCALES.includes(candidate.uiLocale as never)
+        ? (candidate.uiLocale as UiLocalePreference)
+        : DEFAULT_SETTINGS.uiLocale,
     sourceLanguage: validLanguage(candidate.sourceLanguage, 'auto'),
     targetLanguage: validLanguage(candidate.targetLanguage, 'zh-CN'),
     providerProfiles,
@@ -138,6 +151,10 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
     autoTranslation: resolveAutoTranslation(candidate.autoTranslation),
     setupCompleted: candidate.setupCompleted === true,
   };
+}
+
+export function targetLanguageForBrowser(browserLocale: string): string {
+  return resolveUiLocale(browserLocale);
 }
 
 function resolveSiteGlossaries(

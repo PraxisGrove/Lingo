@@ -1,3 +1,4 @@
+import type { MessageKey } from '../i18n/resources';
 import type { SessionSnapshot } from '../page-translation/page-translation';
 import type { ExtensionSettings } from '../storage/settings-model';
 
@@ -11,9 +12,10 @@ export type PopupNotice = {
     | 'authentication'
     | 'rate-limit'
     | 'translation-error';
-  title: string;
-  message: string;
-  action?: 'Open settings' | 'Review service' | 'Retry translation';
+  titleKey: MessageKey;
+  messageKey?: MessageKey;
+  detail?: string;
+  action?: 'open-settings' | 'review-service' | 'retry-translation';
 };
 
 export function resolvePopupNotice(
@@ -24,9 +26,9 @@ export function resolvePopupNotice(
   if (!settings.enabled) {
     return {
       kind: 'disabled',
-      title: 'Lingo is paused',
-      message: 'Enable Lingo in settings to translate webpages.',
-      action: 'Open settings',
+      titleKey: 'popup.notice.disabled.title',
+      messageKey: 'popup.notice.disabled.message',
+      action: 'open-settings',
     };
   }
   if (
@@ -35,25 +37,24 @@ export function resolvePopupNotice(
   ) {
     return {
       kind: 'no-service',
-      title: 'Connect a translation service',
-      message: 'Choose where webpage text is sent before translating.',
-      action: 'Open settings',
+      titleKey: 'popup.notice.noService.title',
+      messageKey: 'popup.notice.noService.message',
+      action: 'open-settings',
     };
   }
   if (!hostPermissionGranted) {
     return {
       kind: 'no-permission',
-      title: 'Page access is unavailable',
-      message: 'Lingo needs permission to read and present this webpage.',
-      action: 'Open settings',
+      titleKey: 'popup.notice.noPermission.title',
+      messageKey: 'popup.notice.noPermission.message',
+      action: 'open-settings',
     };
   }
   if (!page) {
     return {
       kind: 'unsupported-page',
-      title: 'This page cannot be translated',
-      message:
-        'Browser settings, store pages, and internal pages are protected.',
+      titleKey: 'popup.notice.unsupported.title',
+      messageKey: 'popup.notice.unsupported.message',
     };
   }
   if (!page.failure) return null;
@@ -61,31 +62,31 @@ export function resolvePopupNotice(
   if (page.failure.category === 'quota') {
     return {
       kind: 'quota',
-      title: 'Service balance is insufficient',
-      message: page.failure.message,
-      action: 'Review service',
+      titleKey: 'popup.notice.quota.title',
+      detail: page.failure.message,
+      action: 'review-service',
     };
   }
   if (page.failure.category === 'authentication') {
     return {
       kind: 'authentication',
-      title: 'Service credentials were rejected',
-      message: page.failure.message,
-      action: 'Review service',
+      titleKey: 'popup.notice.authentication.title',
+      detail: page.failure.message,
+      action: 'review-service',
     };
   }
   if (page.failure.category === 'rate-limit') {
     return {
       kind: 'rate-limit',
-      title: 'Service is temporarily limited',
-      message: page.failure.message,
-      action: 'Retry translation',
+      titleKey: 'popup.notice.rateLimit.title',
+      detail: page.failure.message,
+      action: 'retry-translation',
     };
   }
   return {
     kind: 'translation-error',
-    title: 'Translation stopped',
-    message: page.failure.message,
-    action: 'Retry translation',
+    titleKey: 'popup.notice.error.title',
+    detail: page.failure.message,
+    action: 'retry-translation',
   };
 }

@@ -1,4 +1,4 @@
-# Lingo Translation
+# Lingo
 
 Lingo is an open-source bilingual webpage translation extension. It keeps the
 original text in context and sends content only to the translation service the

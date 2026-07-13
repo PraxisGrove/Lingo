@@ -7,6 +7,7 @@ import {
   createTranslationCache,
 } from '@/lib/cache/translation-cache';
 import { createDiagnosticReport } from '@/lib/diagnostics/diagnostics';
+import { changeInterfaceLanguage, translate } from '@/lib/i18n/i18n';
 import { createLogger } from '@/lib/logger/logger';
 import { createMessage, isExtensionMessage } from '@/lib/messaging/messages';
 import {
@@ -19,7 +20,12 @@ import {
   saveProviderProfile,
   testProviderProfile,
 } from '@/lib/providers/provider-service';
-import { getSettings } from '@/lib/storage/settings';
+import {
+  getSettings,
+  setSettings,
+  targetLanguageForBrowser,
+  watchSettings,
+} from '@/lib/storage/settings';
 import { createTranslationOrchestrator } from '@/lib/translation/orchestrator';
 import { resolveRequestQuality } from '@/lib/translation/request-quality';
 
@@ -63,8 +69,38 @@ export default defineBackground(() => {
 
   logger.info('Background service worker started.');
 
-  browser.runtime.onInstalled.addListener(() => {
-    void installContextMenus().catch((error) => {
+  let menuUpdate = Promise.resolve();
+  function refreshLocalizedMenus(
+    settings: Awaited<ReturnType<typeof getSettings>>,
+  ) {
+    menuUpdate = menuUpdate
+      .then(async () => {
+        await changeInterfaceLanguage(settings.uiLocale);
+        await installContextMenus();
+      })
+      .catch((error) => {
+        logger.error('Could not install context menus.', { error });
+      });
+    return menuUpdate;
+  }
+
+  void getSettings().then(refreshLocalizedMenus);
+  watchSettings((settings) => {
+    void refreshLocalizedMenus(settings);
+  });
+
+  browser.runtime.onInstalled.addListener((details) => {
+    void (async () => {
+      if (details.reason === 'install') {
+        await setSettings({
+          targetLanguage: targetLanguageForBrowser(
+            browser.i18n.getUILanguage(),
+          ),
+        });
+      }
+      const settings = await getSettings();
+      await refreshLocalizedMenus(settings);
+    })().catch((error) => {
       logger.error('Could not install context menus.', { error });
     });
   });
@@ -180,7 +216,7 @@ async function installContextMenus(): Promise<void> {
   for (const item of PAGE_CONTEXT_MENUS) {
     browser.contextMenus.create({
       id: item.id,
-      title: item.title,
+      title: translate(item.titleKey),
       contexts: ['page'],
     });
   }

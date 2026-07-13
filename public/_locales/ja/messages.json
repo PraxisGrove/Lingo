@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "Lingo"
+  },
+  "extensionDescription": {
+    "message": "選択した翻訳サービスで、ウェブページの原文と訳文を並べて読めます。"
+  },
+  "toggleCommandDescription": {
+    "message": "現在のページを翻訳または原文に戻す"
+  }
+}

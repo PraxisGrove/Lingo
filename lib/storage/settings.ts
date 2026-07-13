@@ -13,6 +13,7 @@ export {
   type ProviderKind,
   type ProviderProfile,
   resolveSettings,
+  targetLanguageForBrowser,
 } from './settings-model';
 
 export const settingsItem = storage.defineItem<ExtensionSettings>(

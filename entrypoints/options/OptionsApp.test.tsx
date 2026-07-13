@@ -92,4 +92,37 @@ describe('OptionsApp', () => {
 
     await act(async () => root.unmount());
   });
+
+  it('switches the complete settings interface language immediately', async () => {
+    mocks.settings = {
+      ...DEFAULT_SETTINGS,
+      uiLocale: 'auto',
+      setupCompleted: true,
+    };
+    document.body.innerHTML = '<div id="root"></div>';
+    const root = createRoot(document.getElementById('root') as HTMLElement);
+
+    await act(async () => {
+      root.render(<OptionsApp />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const localeSelect = document.querySelector<HTMLSelectElement>(
+      '#language-heading + label select',
+    );
+    expect(localeSelect).not.toBeNull();
+    await act(async () => {
+      if (localeSelect) {
+        localeSelect.value = 'zh-CN';
+        localeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(document.querySelector('h1')?.textContent).toBe('设置');
+    expect(document.body.textContent).toContain('隐私与设备数据');
+    await act(async () => root.unmount());
+  });
 });

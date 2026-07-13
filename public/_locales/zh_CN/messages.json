@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "Lingo"
+  },
+  "extensionDescription": {
+    "message": "使用你选择的翻译服务，对照阅读网页原文和译文。"
+  },
+  "toggleCommandDescription": {
+    "message": "翻译当前页面或显示原文"
+  }
+}

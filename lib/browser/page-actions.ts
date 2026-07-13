@@ -1,3 +1,4 @@
+import type { MessageKey } from '../i18n/resources';
 import type {
   SessionPatch,
   SessionSnapshot,
@@ -18,17 +19,17 @@ type PageActionDependencies = {
 export const PAGE_CONTEXT_MENUS = [
   {
     id: 'lingo-translate-page',
-    title: 'Translate page with Lingo',
+    titleKey: 'menu.translate' as MessageKey,
     action: 'translate',
   },
   {
     id: 'lingo-translate-all',
-    title: 'Translate entire page with Lingo',
+    titleKey: 'menu.translateAll' as MessageKey,
     action: 'translate-all',
   },
   {
     id: 'lingo-restore-original',
-    title: 'Restore original page',
+    titleKey: 'menu.restore' as MessageKey,
     action: 'restore',
   },
 ] as const;

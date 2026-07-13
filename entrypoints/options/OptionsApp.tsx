@@ -1,4 +1,13 @@
 import { useEffect, useState } from 'react';
+import {
+  changeInterfaceLanguage,
+  useInterfaceTranslation,
+} from '@/lib/i18n/i18n';
+import {
+  SUPPORTED_UI_LOCALES,
+  type UiLocalePreference,
+} from '@/lib/i18n/locales';
+import type { MessageKey } from '@/lib/i18n/resources';
 import { createLogger } from '@/lib/logger/logger';
 import type { ExtensionMessages } from '@/lib/messaging/messages';
 import { sendMessage } from '@/lib/messaging/send-message';
@@ -20,13 +29,14 @@ import './OptionsApp.css';
 const logger = createLogger('options');
 type ExtensionStatus = ExtensionMessages['getExtensionStatus']['response'];
 const FIELD_LABELS = {
-  endpoint: 'API endpoint (optional)',
-  model: 'Model',
-  region: 'Region',
-  nativeGlossaryId: 'DeepL glossary ID (optional)',
-};
+  endpoint: 'options.provider.endpoint',
+  model: 'options.provider.model',
+  region: 'options.provider.region',
+  nativeGlossaryId: 'options.provider.glossaryId',
+} satisfies Record<string, MessageKey>;
 
 function OptionsApp() {
+  const { locale, t } = useInterfaceTranslation();
   const [settings, setSettingsState] =
     useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [profile, setProfile] = useState<ProviderProfile>({
@@ -53,11 +63,12 @@ function OptionsApp() {
     void getSettings().then((loadedSettings) => {
       setSettingsState(loadedSettings);
       setGlossaryText(formatGlossary(loadedSettings));
+      void changeInterfaceLanguage(loadedSettings.uiLocale);
     });
     void userRuleStore
       .export()
       .then(setUserRules)
-      .catch(() => setRuleStatus('Could not load saved site rules.'));
+      .catch(() => setRuleStatus(t('options.status.rulesLoadError')));
     void communityRuleStore
       .get()
       .then((state) => setCommunityUpdatesEnabled(state.updatesEnabled));
@@ -65,12 +76,16 @@ function OptionsApp() {
     return watchSettings((nextSettings) => {
       setSettingsState(nextSettings);
       setGlossaryText(formatGlossary(nextSettings));
+      void changeInterfaceLanguage(nextSettings.uiLocale);
     });
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
-  }, [settings.theme]);
+    document.documentElement.lang = locale;
+    document.documentElement.dir = 'ltr';
+    document.title = `${t('options.title.settings')} - Lingo`;
+  }, [locale, settings.theme, t]);
 
   async function refreshExtensionStatus() {
     setExtensionStatus(await sendMessage('getExtensionStatus', {}));
@@ -86,22 +101,24 @@ function OptionsApp() {
 
   async function saveAndTest() {
     setBusy(true);
-    setStatus('Saving and testing connection...');
+    setStatus(t('options.status.testing'));
     try {
       const result = await sendMessage('testProviderConnection', {
         profile,
         credential,
       });
       if (!result.ok) {
-        setStatus(`${result.category}: ${result.message}`);
+        setStatus(
+          `${t('options.status.providerError', { category: result.category })}: ${result.message}`,
+        );
         return;
       }
       await sendMessage('saveProviderProfile', { profile, credential });
       await updateSettings({ setupCompleted: true });
       setCredential('');
-      setStatus('Connection successful. Lingo is ready.');
+      setStatus(t('options.status.connectionReady'));
     } catch {
-      setStatus('Could not save or test this service.');
+      setStatus(t('options.status.connectionError'));
     } finally {
       setBusy(false);
     }
@@ -111,10 +128,12 @@ function OptionsApp() {
     try {
       const rules = await userRuleStore.import(userRules);
       setUserRules(JSON.stringify(rules, null, 2));
-      setRuleStatus('Site rules saved.');
+      setRuleStatus(t('options.status.rulesSaved'));
     } catch (error) {
       setRuleStatus(
-        error instanceof Error ? error.message : 'Could not save site rules.',
+        error instanceof Error
+          ? error.message
+          : t('options.status.rulesSaveError'),
       );
     }
   }
@@ -130,9 +149,9 @@ function OptionsApp() {
       link.download = 'lingo-user-rules.json';
       link.click();
       URL.revokeObjectURL(url);
-      setRuleStatus('Site rules exported.');
+      setRuleStatus(t('options.status.rulesExported'));
     } catch {
-      setRuleStatus('Enter valid JSON before exporting site rules.');
+      setRuleStatus(t('options.status.rulesInvalidJson'));
     }
   }
 
@@ -152,7 +171,7 @@ function OptionsApp() {
   async function saveSiteGlossary() {
     const hostname = siteHostname.trim().toLowerCase();
     if (!validHostname(hostname)) {
-      setQualityStatus('Enter a valid hostname, such as docs.example.com.');
+      setQualityStatus(t('options.status.invalidHostname'));
       return;
     }
     const siteGlossaries = { ...settings.siteGlossaries };
@@ -163,21 +182,21 @@ function OptionsApp() {
     setSiteHostname(hostname);
     setQualityStatus(
       glossary.length > 0
-        ? `Glossary saved for ${hostname}.`
-        : `Glossary removed for ${hostname}.`,
+        ? t('options.status.glossarySaved', { hostname })
+        : t('options.status.glossaryRemoved', { hostname }),
     );
   }
 
   async function clearCache() {
     await sendMessage('clearTranslationCache', {});
     await refreshExtensionStatus();
-    setPrivacyStatus('Translation cache cleared.');
+    setPrivacyStatus(t('options.status.cacheCleared'));
   }
 
   async function exportDiagnostics() {
     const report = await sendMessage('exportDiagnostics', {});
     downloadJson('lingo-diagnostics.json', report);
-    setPrivacyStatus('Redacted diagnostics exported.');
+    setPrivacyStatus(t('options.status.diagnosticsExported'));
   }
 
   async function deleteActiveProvider() {
@@ -185,7 +204,7 @@ function OptionsApp() {
     if (!profileId) return;
     await sendMessage('deleteProviderProfile', { profileId });
     setConfirmingDelete(false);
-    setStatus('Translation service removed from this browser.');
+    setStatus(t('options.status.serviceRemoved'));
   }
 
   const providerDefinition =
@@ -195,31 +214,65 @@ function OptionsApp() {
     <main className="options">
       <header>
         <div className="badge">Lingo</div>
-        <h1>{settings.setupCompleted ? 'Settings' : 'Set up Lingo'}</h1>
-        <p>Choose your reading language and connect a translation service.</p>
+        <h1>
+          {settings.setupCompleted
+            ? t('options.title.settings')
+            : t('options.title.setup')}
+        </h1>
+        <p>{t('options.subtitle')}</p>
         {!settings.setupCompleted && (
           <button
             className="skip-button"
             type="button"
             onClick={() => void updateSettings({ setupCompleted: true })}
           >
-            Set up later
+            {t('options.setupLater')}
           </button>
         )}
       </header>
-      <nav className="section-nav" aria-label="Settings sections">
-        <a href="#language-heading">Languages</a>
-        <a href="#provider-heading">Services</a>
-        <a href="#automation-heading">Automation</a>
-        <a href="#quality-heading">Quality</a>
-        <a href="#privacy-heading">Privacy</a>
+      <nav className="section-nav" aria-label={t('options.sections.label')}>
+        <a href="#language-heading">{t('options.sections.languages')}</a>
+        <a href="#provider-heading">{t('options.sections.services')}</a>
+        <a href="#automation-heading">{t('options.sections.automation')}</a>
+        <a href="#quality-heading">{t('options.sections.quality')}</a>
+        <a href="#privacy-heading">{t('options.sections.privacy')}</a>
       </nav>
       <section className="panel" aria-labelledby="language-heading">
-        <h2 id="language-heading">Languages</h2>
+        <h2 id="language-heading">{t('options.sections.languages')}</h2>
         <label className="row">
           <span>
-            <strong>Source language</strong>
-            <small>Automatic detection works for most pages.</small>
+            <strong>{t('options.interfaceLanguage')}</strong>
+            <small>{t('options.interfaceLanguage.help')}</small>
+          </span>
+          <select
+            value={settings.uiLocale}
+            onChange={(event) => {
+              const uiLocale = event.currentTarget.value as UiLocalePreference;
+              setStatus('');
+              setRuleStatus('');
+              setQualityStatus('');
+              setPrivacyStatus('');
+              void changeInterfaceLanguage(uiLocale).then(() =>
+                updateSettings({ uiLocale }),
+              );
+            }}
+          >
+            <option value="auto">
+              {t('language.auto', {
+                language: t(`language.${locale}` as MessageKey),
+              })}
+            </option>
+            {SUPPORTED_UI_LOCALES.map((supportedLocale) => (
+              <option value={supportedLocale} key={supportedLocale}>
+                {t(`language.${supportedLocale}` as MessageKey)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="row">
+          <span>
+            <strong>{t('options.sourceLanguage')}</strong>
+            <small>{t('options.sourceLanguage.help')}</small>
           </span>
           <select
             value={settings.sourceLanguage}
@@ -227,18 +280,18 @@ function OptionsApp() {
               void updateSettings({ sourceLanguage: event.currentTarget.value })
             }
           >
-            <option value="auto">Detect automatically</option>
-            <option value="en">English</option>
-            <option value="zh-CN">Chinese (Simplified)</option>
-            <option value="ja">Japanese</option>
-            <option value="de">German</option>
-            <option value="fr">French</option>
+            <option value="auto">{t('options.detectAutomatically')}</option>
+            {SUPPORTED_UI_LOCALES.map((language) => (
+              <option value={language} key={language}>
+                {t(`language.${language}` as MessageKey)}
+              </option>
+            ))}
           </select>
         </label>
         <label className="row">
           <span>
-            <strong>Target language</strong>
-            <small>The language used for translated paragraphs.</small>
+            <strong>{t('popup.targetLanguage')}</strong>
+            <small>{t('options.targetLanguage.help')}</small>
           </span>
           <select
             value={settings.targetLanguage}
@@ -246,23 +299,20 @@ function OptionsApp() {
               void updateSettings({ targetLanguage: event.currentTarget.value })
             }
           >
-            <option value="zh-CN">Chinese (Simplified)</option>
-            <option value="en">English</option>
-            <option value="ja">Japanese</option>
-            <option value="de">German</option>
-            <option value="fr">French</option>
-            <option value="es">Spanish</option>
+            {SUPPORTED_UI_LOCALES.map((language) => (
+              <option value={language} key={language}>
+                {t(`language.${language}` as MessageKey)}
+              </option>
+            ))}
           </select>
         </label>
       </section>
       <section className="panel" aria-labelledby="automation-heading">
-        <h2 id="automation-heading">Automatic translation</h2>
+        <h2 id="automation-heading">{t('options.automation.title')}</h2>
         <label className="row">
           <span>
-            <strong>Automatic translation</strong>
-            <small>
-              Allow Lingo to begin translation when a matching rule applies.
-            </small>
+            <strong>{t('options.automation.enabled')}</strong>
+            <small>{t('options.automation.enabled.help')}</small>
           </span>
           <input
             type="checkbox"
@@ -279,10 +329,8 @@ function OptionsApp() {
         </label>
         <label className="row">
           <span>
-            <strong>Default automatic sites</strong>
-            <small>
-              Use Lingo's built-in rules for selected reading sites.
-            </small>
+            <strong>{t('options.automation.defaultSites')}</strong>
+            <small>{t('options.automation.defaultSites.help')}</small>
           </span>
           <input
             type="checkbox"
@@ -299,10 +347,8 @@ function OptionsApp() {
         </label>
         <label className="row">
           <span>
-            <strong>Community rule updates</strong>
-            <small>
-              Accept only signed community rule updates stored on this device.
-            </small>
+            <strong>{t('options.automation.communityRules')}</strong>
+            <small>{t('options.automation.communityRules.help')}</small>
           </span>
           <input
             type="checkbox"
@@ -314,7 +360,7 @@ function OptionsApp() {
         </label>
         <div className="language-policy">
           <label>
-            Source language policy
+            {t('options.automation.sourcePolicy')}
             <select
               value={settings.autoTranslation.sourceLanguagePolicy.mode}
               onChange={(event) =>
@@ -332,13 +378,17 @@ function OptionsApp() {
                 })
               }
             >
-              <option value="all">Translate all detected languages</option>
-              <option value="included">Translate only these languages</option>
-              <option value="excluded">Do not translate these languages</option>
+              <option value="all">{t('options.automation.policy.all')}</option>
+              <option value="included">
+                {t('options.automation.policy.included')}
+              </option>
+              <option value="excluded">
+                {t('options.automation.policy.excluded')}
+              </option>
             </select>
           </label>
           <label>
-            Languages
+            {t('options.sections.languages')}
             <input
               value={settings.autoTranslation.sourceLanguagePolicy.languages.join(
                 ', ',
@@ -366,20 +416,20 @@ function OptionsApp() {
         </div>
       </section>
       <section className="panel" aria-labelledby="site-rules-heading">
-        <h2 id="site-rules-heading">Site rules</h2>
+        <h2 id="site-rules-heading">{t('options.rules.title')}</h2>
         <div className="rule-editor">
           <textarea
-            aria-label="User site rules JSON"
+            aria-label={t('options.rules.jsonLabel')}
             value={userRules}
             onChange={(event) => setUserRules(event.currentTarget.value)}
             spellCheck={false}
           />
           <div className="rule-actions">
             <button type="button" onClick={() => void saveUserRules()}>
-              Save imported rules
+              {t('options.rules.save')}
             </button>
             <button type="button" onClick={downloadUserRules}>
-              Export rules
+              {t('options.rules.export')}
             </button>
           </div>
           <p className="connection-status" role="status">
@@ -388,11 +438,11 @@ function OptionsApp() {
         </div>
       </section>
       <section className="panel" aria-labelledby="quality-heading">
-        <h2 id="quality-heading">Translation quality</h2>
+        <h2 id="quality-heading">{t('options.quality.title')}</h2>
         <label className="row">
           <span>
-            <strong>Instruction template</strong>
-            <small>Sets the default style for translated paragraphs.</small>
+            <strong>{t('options.quality.template')}</strong>
+            <small>{t('options.quality.template.help')}</small>
           </span>
           <select
             value={settings.translationQuality.template}
@@ -408,13 +458,13 @@ function OptionsApp() {
               })
             }
           >
-            <option value="faithful">Faithful</option>
-            <option value="natural">Natural</option>
-            <option value="concise">Concise</option>
+            <option value="faithful">{t('options.quality.faithful')}</option>
+            <option value="natural">{t('options.quality.natural')}</option>
+            <option value="concise">{t('options.quality.concise')}</option>
           </select>
         </label>
         <label>
-          Additional translation instruction
+          {t('options.quality.instruction')}
           <textarea
             value={settings.translationQuality.instruction}
             onChange={(event) =>
@@ -428,9 +478,9 @@ function OptionsApp() {
           />
         </label>
         <label>
-          Global glossary
+          {t('options.quality.globalGlossary')}
           <textarea
-            aria-label="Glossary"
+            aria-label={t('options.quality.glossaryLabel')}
             placeholder="Lingo => Lingo"
             value={glossaryText}
             onChange={(event) => setGlossaryText(event.currentTarget.value)}
@@ -445,12 +495,12 @@ function OptionsApp() {
           />
         </label>
         <div className="site-glossary">
-          <h3>Site glossary</h3>
+          <h3>{t('options.quality.siteGlossary')}</h3>
           <p className="site-glossary-intro">
-            Override terminology only when translating a matching hostname.
+            {t('options.quality.siteGlossary.help')}
           </p>
           <label>
-            Site hostname
+            {t('options.quality.hostname')}
             <input
               list="site-glossary-hostnames"
               value={siteHostname}
@@ -466,7 +516,7 @@ function OptionsApp() {
             </datalist>
           </label>
           <label>
-            Terms
+            {t('options.quality.terms')}
             <textarea
               value={siteGlossaryText}
               placeholder="API => interface"
@@ -477,7 +527,7 @@ function OptionsApp() {
           </label>
           <div className="site-glossary-actions">
             <button type="button" onClick={() => void saveSiteGlossary()}>
-              Save site glossary
+              {t('options.quality.saveSiteGlossary')}
             </button>
             <p className="connection-status" role="status">
               {qualityStatus}
@@ -489,11 +539,11 @@ function OptionsApp() {
         className="panel provider-panel"
         aria-labelledby="provider-heading"
       >
-        <h2 id="provider-heading">Translation service</h2>
+        <h2 id="provider-heading">{t('popup.translationService')}</h2>
         {settings.providerProfiles.length > 0 && (
           <div className="saved-profile-row">
             <label className="existing-profile">
-              Saved profile
+              {t('options.provider.savedProfile')}
               <select
                 value={settings.activeProviderProfileId ?? ''}
                 onChange={(event) =>
@@ -521,7 +571,9 @@ function OptionsApp() {
                   : setConfirmingDelete(true)
               }
             >
-              {confirmingDelete ? 'Confirm removal' : 'Remove selected service'}
+              {confirmingDelete
+                ? t('options.provider.confirmRemoval')
+                : t('options.provider.removeSelected')}
             </button>
             {confirmingDelete && (
               <button
@@ -529,14 +581,14 @@ function OptionsApp() {
                 type="button"
                 onClick={() => setConfirmingDelete(false)}
               >
-                Cancel
+                {t('options.cancel')}
               </button>
             )}
           </div>
         )}
         {settings.providerProfiles.length > 1 && (
           <fieldset className="fallback-chain">
-            <legend>Fallback services</legend>
+            <legend>{t('options.provider.fallbackServices')}</legend>
             {settings.providerProfiles
               .filter((item) => item.id !== settings.activeProviderProfileId)
               .map((item) => (
@@ -573,7 +625,7 @@ function OptionsApp() {
         )}
         <div className="form-grid">
           <label>
-            Provider
+            {t('options.provider.provider')}
             <select
               value={profile.provider}
               onChange={(event) =>
@@ -592,10 +644,10 @@ function OptionsApp() {
             </select>
           </label>
           <label>
-            Profile name
+            {t('options.provider.profileName')}
             <input
               value={profile.name}
-              placeholder="Personal API"
+              placeholder={t('options.provider.profilePlaceholder')}
               onChange={(event) =>
                 setProfile({ ...profile, name: event.currentTarget.value })
               }
@@ -603,7 +655,7 @@ function OptionsApp() {
           </label>
           {providerDefinition.fields.map((field) => (
             <label key={field}>
-              {FIELD_LABELS[field]}
+              {t(FIELD_LABELS[field])}
               <input
                 value={profile[field] ?? ''}
                 onChange={(event) =>
@@ -616,7 +668,7 @@ function OptionsApp() {
             </label>
           ))}
           <label>
-            API credential
+            {t('options.provider.credential')}
             <input
               type="password"
               value={credential}
@@ -631,21 +683,20 @@ function OptionsApp() {
             disabled={busy || !profile.name || !credential}
             onClick={() => void saveAndTest()}
           >
-            {busy ? 'Testing...' : 'Save and test connection'}
+            {busy
+              ? t('options.provider.testing')
+              : t('options.provider.saveAndTest')}
           </button>
           <p className="connection-status" role="status">
             {status}
           </p>
         </div>
         <small className="privacy-note">
-          The test sends only the fixed word “Hello”. When translating, webpage
-          text is sent directly from the extension to this provider. Credentials
-          remain in this browser profile. Provider pricing and data handling are
-          governed by your provider account.
+          {t('options.provider.privacyNote')}
         </small>
         <div className="translation-preview">
-          <span>Hello, welcome to Lingo.</span>
-          <span>你好，欢迎使用 Lingo。</span>
+          <span>{t('options.provider.previewSource')}</span>
+          <span>{t('options.provider.previewTarget')}</span>
         </div>
       </section>
       <section
@@ -653,62 +704,60 @@ function OptionsApp() {
         id="privacy-heading"
         aria-labelledby="privacy-title"
       >
-        <h2 id="privacy-title">Privacy and device data</h2>
+        <h2 id="privacy-title">{t('options.privacy.title')}</h2>
         <div className="status-list">
           <div>
-            <span>Page access</span>
+            <span>{t('options.privacy.pageAccess')}</span>
             <strong>
               {extensionStatus?.hostPermissionGranted
-                ? 'Allowed on all sites'
-                : 'Not granted'}
+                ? t('options.privacy.allowedAllSites')
+                : t('options.privacy.notGranted')}
             </strong>
             {extensionStatus && !extensionStatus.hostPermissionGranted && (
-              <small>
-                Grant site access in your browser extension controls.
-              </small>
+              <small>{t('options.privacy.grantAccess')}</small>
             )}
           </div>
           <div>
-            <span>Translation cache</span>
+            <span>{t('options.settings.cache')}</span>
             <strong>
               {extensionStatus
-                ? `${extensionStatus.cache.entryCount} entries, ${formatBytes(extensionStatus.cache.byteSize)}`
-                : 'Calculating usage'}
+                ? t('options.privacy.cacheUsage', {
+                    count: extensionStatus.cache.entryCount,
+                    size: formatBytes(extensionStatus.cache.byteSize, locale),
+                  })
+                : t('options.privacy.calculating')}
             </strong>
           </div>
           <div>
-            <span>Data flow</span>
+            <span>{t('popup.dataFlow')}</span>
             <strong>
-              Webpage text →{' '}
-              {settings.providerProfiles.find(
-                (item) => item.id === settings.activeProviderProfileId,
-              )?.name ?? 'No service selected'}
+              {t('options.privacy.webpageToProvider', {
+                provider:
+                  settings.providerProfiles.find(
+                    (item) => item.id === settings.activeProviderProfileId,
+                  )?.name ?? t('popup.noServiceSelected'),
+              })}
             </strong>
-            <small>
-              Credentials stay in this browser profile. Lingo has no telemetry
-              endpoint.
-            </small>
+            <small>{t('options.privacy.dataFlowHelp')}</small>
           </div>
         </div>
         <div className="privacy-actions">
           <button type="button" onClick={() => void exportDiagnostics()}>
-            Export redacted diagnostics
+            {t('options.privacy.exportDiagnostics')}
           </button>
           <button type="button" onClick={() => void clearCache()}>
-            Clear translation cache
+            {t('options.privacy.clearCache')}
           </button>
         </div>
         <p className="connection-status" role="status">
           {privacyStatus}
         </p>
       </section>
-      <section className="panel" aria-label="Extension settings">
+      <section className="panel" aria-label={t('options.settings.label')}>
         <label className="row">
           <span>
-            <strong>Translation cache</strong>
-            <small>
-              Reuse local translations from the same service and model.
-            </small>
+            <strong>{t('options.settings.cache')}</strong>
+            <small>{t('options.settings.cache.help')}</small>
           </span>
           <input
             type="checkbox"
@@ -722,10 +771,8 @@ function OptionsApp() {
         </label>
         <label className="row">
           <span>
-            <strong>Floating page control</strong>
-            <small>
-              Show a compact translate button on supported webpages.
-            </small>
+            <strong>{t('options.settings.floatingControl')}</strong>
+            <small>{t('options.settings.floatingControl.help')}</small>
           </span>
           <input
             type="checkbox"
@@ -739,8 +786,8 @@ function OptionsApp() {
         </label>
         <label className="row">
           <span>
-            <strong>Enabled</strong>
-            <small>Allow Lingo to run on supported webpages.</small>
+            <strong>{t('options.settings.enabled')}</strong>
+            <small>{t('options.settings.enabled.help')}</small>
           </span>
           <input
             type="checkbox"
@@ -752,8 +799,8 @@ function OptionsApp() {
         </label>
         <label className="row">
           <span>
-            <strong>Theme</strong>
-            <small>Choose how Lingo follows your browser appearance.</small>
+            <strong>{t('options.settings.theme')}</strong>
+            <small>{t('options.settings.theme.help')}</small>
           </span>
           <select
             value={settings.theme}
@@ -763,9 +810,9 @@ function OptionsApp() {
               })
             }
           >
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
+            <option value="system">{t('options.settings.theme.system')}</option>
+            <option value="light">{t('options.settings.theme.light')}</option>
+            <option value="dark">{t('options.settings.theme.dark')}</option>
           </select>
         </label>
       </section>
@@ -794,10 +841,11 @@ function parseGlossary(value: string) {
   });
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function formatBytes(bytes: number, locale: string): string {
+  const number = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 });
+  if (bytes < 1024) return `${number.format(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${number.format(bytes / 1024)} KB`;
+  return `${number.format(bytes / (1024 * 1024))} MB`;
 }
 
 function validHostname(value: string): boolean {

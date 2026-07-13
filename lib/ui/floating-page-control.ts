@@ -1,3 +1,4 @@
+import type { MessageKey } from '../i18n/resources';
 import type {
   PageTranslation,
   SessionSnapshot,
@@ -8,18 +9,20 @@ type FloatingPageControlDependencies = {
   document: Document;
   isTopFrame: boolean;
   pageTranslation: PageTranslation;
+  translate(key: MessageKey): string;
 };
 
 export function createFloatingPageControl({
   document,
   isTopFrame,
   pageTranslation,
+  translate,
 }: FloatingPageControlDependencies) {
   let settings: ExtensionSettings | undefined;
   let host: HTMLElement | undefined;
   let button: HTMLButtonElement | undefined;
   const unsubscribe = pageTranslation.subscribe(({ snapshot }) => {
-    updateButton(button, snapshot);
+    updateButton(button, snapshot, translate);
   });
 
   function remove() {
@@ -40,7 +43,7 @@ export function createFloatingPageControl({
         return;
       }
       if (!host) {
-        const control = createControlElement(document, async () => {
+        const control = createControlElement(document, translate, async () => {
           if (!settings) return;
           const snapshot = pageTranslation.snapshot();
           if (snapshot.status === 'idle') {
@@ -56,7 +59,7 @@ export function createFloatingPageControl({
         button = control.button;
         document.documentElement.append(host);
       }
-      updateButton(button, pageTranslation.snapshot());
+      updateButton(button, pageTranslation.snapshot(), translate);
     },
     dispose() {
       unsubscribe();
@@ -75,6 +78,7 @@ function start(pageTranslation: PageTranslation, targetLanguage: string) {
 
 function createControlElement(
   document: Document,
+  translate: (key: MessageKey) => string,
   onClick: () => Promise<void>,
 ): { host: HTMLElement; button: HTMLButtonElement } {
   const host = document.createElement('div');
@@ -85,8 +89,8 @@ function createControlElement(
   const button = document.createElement('button');
   button.type = 'button';
   button.textContent = 'L';
-  button.title = 'Translate page with Lingo';
-  button.setAttribute('aria-label', 'Translate page with Lingo');
+  button.title = translate('floating.translate');
+  button.setAttribute('aria-label', translate('floating.translate'));
   button.addEventListener('click', () => void onClick());
   root.append(style, button);
   return { host, button };
@@ -95,6 +99,7 @@ function createControlElement(
 function updateButton(
   button: HTMLButtonElement | undefined,
   snapshot: SessionSnapshot,
+  translate: (key: MessageKey) => string,
 ) {
   if (!button) return;
   const active = snapshot.status !== 'idle' && snapshot.status !== 'failed';
@@ -102,10 +107,10 @@ function updateButton(
   button.dataset.state = snapshot.status;
   const label =
     snapshot.status === 'failed'
-      ? 'Retry page translation with Lingo'
+      ? translate('floating.retry')
       : active
-        ? 'Restore original page'
-        : 'Translate page with Lingo';
+        ? translate('floating.restore')
+        : translate('floating.translate');
   button.title = label;
   button.setAttribute('aria-label', label);
 }

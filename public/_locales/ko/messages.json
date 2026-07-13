@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "Lingo"
+  },
+  "extensionDescription": {
+    "message": "선택한 번역 서비스로 웹페이지 원문과 번역문을 함께 읽으세요."
+  },
+  "toggleCommandDescription": {
+    "message": "현재 페이지 번역 또는 원문 복원"
+  }
+}

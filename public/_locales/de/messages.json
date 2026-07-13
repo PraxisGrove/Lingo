@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "Lingo"
+  },
+  "extensionDescription": {
+    "message": "Lies übersetzte Webseiten neben dem Originaltext mit deinem gewählten Dienst."
+  },
+  "toggleCommandDescription": {
+    "message": "Aktuelle Seite übersetzen oder Original anzeigen"
+  }
+}

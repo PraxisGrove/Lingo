@@ -35,6 +35,7 @@ describe('floating page control', () => {
       document,
       isTopFrame: true,
       pageTranslation: pageTranslation(),
+      translate: (key) => key,
     });
     topControl.update(DEFAULT_SETTINGS);
     expect(document.querySelector('[data-lingo-floating-control]')).toBeNull();
@@ -49,6 +50,7 @@ describe('floating page control', () => {
       document,
       isTopFrame: false,
       pageTranslation: pageTranslation(),
+      translate: (key) => key,
     });
     frameControl.update({ ...DEFAULT_SETTINGS, floatingButtonEnabled: true });
     expect(document.querySelector('[data-lingo-floating-control]')).toBeNull();
@@ -60,6 +62,8 @@ describe('floating page control', () => {
       document,
       isTopFrame: true,
       pageTranslation: session,
+      translate: (key) =>
+        key === 'floating.translate' ? 'Translate page with Lingo' : key,
     });
     control.update({
       ...DEFAULT_SETTINGS,

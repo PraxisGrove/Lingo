@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
+  changeInterfaceLanguage,
+  useInterfaceTranslation,
+} from '@/lib/i18n/i18n';
+import type { MessageKey } from '@/lib/i18n/resources';
+import {
   createMessage,
   type ExtensionMessages,
 } from '@/lib/messaging/messages';
@@ -29,37 +34,46 @@ const IDLE_SNAPSHOT: SessionSnapshot = {
 type ExtensionStatus = ExtensionMessages['getExtensionStatus']['response'];
 
 function App() {
+  const { locale, t } = useInterfaceTranslation();
   const [settings, setSettingsState] =
     useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [page, setPage] = useState<SessionSnapshot | null>(null);
   const [pageLoaded, setPageLoaded] = useState(false);
   const [extensionStatus, setExtensionStatus] =
     useState<ExtensionStatus | null>(null);
-  const [hostname, setHostname] = useState('Current page');
+  const [hostname, setHostname] = useState('');
   const [sitePolicy, setSitePolicy] =
     useState<SiteTranslationPolicy>('default');
   const [includePageInterface, setIncludePageInterface] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void getSettings().then(setSettingsState);
+    void getSettings().then((loadedSettings) => {
+      setSettingsState(loadedSettings);
+      void changeInterfaceLanguage(loadedSettings.uiLocale);
+    });
     void sendMessage('getExtensionStatus', {}).then(setExtensionStatus);
     void loadActivePage().then(({ hostname: activeHostname, snapshot }) => {
       setHostname(activeHostname);
       setPage(snapshot);
       setPageLoaded(true);
-      if (activeHostname !== 'Current page') {
+      if (activeHostname !== '') {
         void userRuleStore
           .translationPolicyFor(activeHostname)
           .then(setSitePolicy);
       }
     });
-    return watchSettings(setSettingsState);
+    return watchSettings((nextSettings) => {
+      setSettingsState(nextSettings);
+      void changeInterfaceLanguage(nextSettings.uiLocale);
+    });
   }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
-  }, [settings.theme]);
+    document.documentElement.lang = locale;
+    document.documentElement.dir = 'ltr';
+  }, [locale, settings.theme]);
 
   useEffect(() => {
     if (!pageLoaded) return;
@@ -79,7 +93,7 @@ function App() {
 
   async function updateSitePolicy(policy: SiteTranslationPolicy) {
     setSitePolicy(policy);
-    if (hostname !== 'Current page') {
+    if (hostname !== '') {
       await userRuleStore.setTranslationPolicy(hostname, policy);
     }
   }
@@ -128,15 +142,15 @@ function App() {
       <header className="popup-header">
         <div>
           <strong className="brand">Lingo</strong>
-          <span className="hostname" title={hostname}>
-            {hostname}
+          <span className="hostname" title={hostname || t('popup.currentPage')}>
+            {hostname || t('popup.currentPage')}
           </span>
         </div>
         <button
           className="icon-button"
           type="button"
-          title="Open settings"
-          aria-label="Open settings"
+          title={t('common.openSettings')}
+          aria-label={t('common.openSettings')}
           onClick={() => browser.runtime.openOptionsPage()}
         >
           ⚙
@@ -148,31 +162,37 @@ function App() {
           className={`status-dot status-${page?.status ?? 'loading'}`}
           aria-hidden="true"
         />
-        <span>{pageLoaded ? statusLabel(page) : 'Checking this page'}</span>
+        <span>
+          {pageLoaded ? t(statusLabel(page)) : t('popup.checkingPage')}
+        </span>
         {page?.totalUnitCount ? (
           <span className="progress-count">
             {page.translatedUnitCount}/{page.totalUnitCount}
-            {page.failedUnitCount > 0 ? `, ${page.failedUnitCount} failed` : ''}
+            {page.failedUnitCount > 0
+              ? `, ${t('popup.failedCount', { count: page.failedUnitCount })}`
+              : ''}
           </span>
         ) : null}
       </div>
 
       {notice ? (
         <section className={`notice notice-${notice.kind}`} aria-live="polite">
-          <h1>{notice.title}</h1>
-          <p>{notice.message}</p>
+          <h1>{t(notice.titleKey)}</h1>
+          <p>
+            {notice.detail ?? (notice.messageKey ? t(notice.messageKey) : '')}
+          </p>
           {notice.action && (
             <button
               className="primary-action"
               type="button"
               disabled={busy}
               onClick={() =>
-                notice.action === 'Retry translation'
+                notice.action === 'retry-translation'
                   ? void retryTranslation()
                   : browser.runtime.openOptionsPage()
               }
             >
-              {notice.action}
+              {t(actionLabel(notice.action))}
             </button>
           )}
         </section>
@@ -185,12 +205,17 @@ function App() {
               disabled={busy || !pageLoaded}
               onClick={() => void startTranslation()}
             >
-              {busy ? 'Starting translation' : 'Translate page'}
+              {busy
+                ? t('popup.action.starting')
+                : t('popup.action.translatePage')}
             </button>
           ) : (
-            <section className="session-controls" aria-label="Page translation">
+            <section
+              className="session-controls"
+              aria-label={t('popup.session.label')}
+            >
               <fieldset className="segmented-control">
-                <legend>Display</legend>
+                <legend>{t('popup.display.legend')}</legend>
                 {(['bilingual', 'translation', 'original'] as const).map(
                   (mode) => (
                     <button
@@ -204,7 +229,7 @@ function App() {
                       }
                       key={mode}
                     >
-                      {displayModeLabel(mode)}
+                      {t(displayModeLabel(mode))}
                     </button>
                   ),
                 )}
@@ -220,7 +245,7 @@ function App() {
                     })
                   }
                 >
-                  Translate all
+                  {t('popup.action.translateAll')}
                 </button>
                 <button
                   className="text-button"
@@ -228,7 +253,7 @@ function App() {
                   disabled={busy}
                   onClick={() => runCommand('stopPageTranslation', {})}
                 >
-                  Restore original
+                  {t('popup.action.restore')}
                 </button>
               </div>
               {page && page.failedUnitCount > 0 && (
@@ -238,15 +263,20 @@ function App() {
                   disabled={busy}
                   onClick={() => void retryTranslation()}
                 >
-                  Retry {page.failedUnitCount} failed paragraphs
+                  {t('popup.action.retryFailed', {
+                    count: page.failedUnitCount,
+                  })}
                 </button>
               )}
             </section>
           )}
 
-          <section className="page-options" aria-label="Current page options">
+          <section
+            className="page-options"
+            aria-label={t('popup.options.label')}
+          >
             <label>
-              <span>Target language</span>
+              <span>{t('popup.targetLanguage')}</span>
               <select
                 value={settings.targetLanguage}
                 onChange={(event) =>
@@ -255,20 +285,21 @@ function App() {
                   })
                 }
               >
-                <option value="zh-CN">Chinese (Simplified)</option>
-                <option value="en">English</option>
-                <option value="ja">Japanese</option>
-                <option value="de">German</option>
-                <option value="fr">French</option>
-                <option value="es">Spanish</option>
+                <option value="zh-CN">{t('language.zh-CN')}</option>
+                <option value="zh-TW">{t('language.zh-TW')}</option>
+                <option value="en">{t('language.en')}</option>
+                <option value="ja">{t('language.ja')}</option>
+                <option value="ko">{t('language.ko')}</option>
+                <option value="de">{t('language.de')}</option>
+                <option value="fr">{t('language.fr')}</option>
+                <option value="es">{t('language.es')}</option>
+                <option value="pt-BR">{t('language.pt-BR')}</option>
               </select>
             </label>
             <label className="toggle-option">
               <span>
-                Translate page interface
-                <small>
-                  Include navigation, buttons, headers, and footers.
-                </small>
+                {t('popup.translateInterface')}
+                <small>{t('popup.translateInterface.help')}</small>
               </span>
               <input
                 type="checkbox"
@@ -280,7 +311,7 @@ function App() {
               />
             </label>
             <label>
-              <span>Translation service</span>
+              <span>{t('popup.translationService')}</span>
               <select
                 value={settings.activeProviderProfileId ?? ''}
                 onChange={(event) =>
@@ -297,7 +328,7 @@ function App() {
               </select>
             </label>
             <label>
-              <span>Site policy</span>
+              <span>{t('popup.sitePolicy')}</span>
               <select
                 value={sitePolicy}
                 onChange={(event) =>
@@ -306,9 +337,9 @@ function App() {
                   )
                 }
               >
-                <option value="default">Follow default</option>
-                <option value="always">Always translate</option>
-                <option value="never">Never translate</option>
+                <option value="default">{t('popup.sitePolicy.default')}</option>
+                <option value="always">{t('popup.sitePolicy.always')}</option>
+                <option value="never">{t('popup.sitePolicy.never')}</option>
               </select>
             </label>
           </section>
@@ -316,9 +347,11 @@ function App() {
       )}
 
       <footer className="data-flow">
-        <span>Data flow</span>
+        <span>{t('popup.dataFlow')}</span>
         <strong>
-          This page → {activeProvider?.name ?? 'No service selected'}
+          {t('popup.dataFlow.pageToProvider', {
+            provider: activeProvider?.name ?? t('popup.noServiceSelected'),
+          })}
         </strong>
       </footer>
     </main>
@@ -336,11 +369,9 @@ async function loadActivePage(): Promise<{
   snapshot: SessionSnapshot | null;
 }> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  let hostname = 'Current page';
+  let hostname = '';
   try {
-    hostname = tab?.url
-      ? new URL(tab.url).hostname || 'Current page'
-      : hostname;
+    hostname = tab?.url ? new URL(tab.url).hostname : hostname;
   } catch {
     // Browser-internal URLs do not always parse as web origins.
   }
@@ -367,21 +398,29 @@ async function sendToActiveTab<TName extends PageMessageName>(
   return browser.tabs.sendMessage(tab.id, createMessage(type, payload));
 }
 
-function statusLabel(snapshot: SessionSnapshot | null): string {
-  if (!snapshot) return 'Page unavailable';
-  if (snapshot.status === 'translating') return 'Translating visible content';
+function statusLabel(snapshot: SessionSnapshot | null): MessageKey {
+  if (!snapshot) return 'popup.status.unavailable';
+  if (snapshot.status === 'translating') return 'popup.status.translating';
   if (snapshot.status === 'translated' && snapshot.failedUnitCount > 0) {
-    return 'Translation active with partial failures';
+    return 'popup.status.partial';
   }
-  if (snapshot.status === 'translated') return 'Translation active';
-  if (snapshot.status === 'failed') return 'Translation needs attention';
-  return 'Ready to translate';
+  if (snapshot.status === 'translated') return 'popup.status.active';
+  if (snapshot.status === 'failed') return 'popup.status.attention';
+  return 'popup.status.ready';
 }
 
-function displayModeLabel(mode: SessionSnapshot['displayMode']): string {
-  if (mode === 'bilingual') return 'Bilingual';
-  if (mode === 'translation') return 'Translation';
-  return 'Original';
+function displayModeLabel(mode: SessionSnapshot['displayMode']): MessageKey {
+  if (mode === 'bilingual') return 'popup.display.bilingual';
+  if (mode === 'translation') return 'popup.display.translation';
+  return 'popup.display.original';
+}
+
+function actionLabel(
+  action: NonNullable<ReturnType<typeof resolvePopupNotice>>['action'],
+): MessageKey {
+  if (action === 'review-service') return 'popup.action.reviewService';
+  if (action === 'retry-translation') return 'popup.action.retry';
+  return 'common.openSettings';
 }
 
 export default App;

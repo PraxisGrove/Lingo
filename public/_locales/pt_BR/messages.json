@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "Lingo"
+  },
+  "extensionDescription": {
+    "message": "Leia páginas traduzidas ao lado do texto original com o serviço escolhido."
+  },
+  "toggleCommandDescription": {
+    "message": "Traduzir a página atual ou restaurar o original"
+  }
+}

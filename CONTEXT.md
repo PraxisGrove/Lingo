@@ -1,4 +1,4 @@
-# Lingo Translation
+# Lingo
 
 Lingo 为阅读外语网页的人提供保留原文语境的双语网页翻译体验。
 

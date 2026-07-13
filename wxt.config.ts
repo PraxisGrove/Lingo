@@ -3,17 +3,20 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
-    name: 'Lingo Translation',
-    description:
-      'Read translated webpages alongside the original text using your chosen translation service.',
+    default_locale: 'en',
+    name: '__MSG_extensionName__',
+    description: '__MSG_extensionDescription__',
     permissions: ['storage', 'contextMenus'],
     host_permissions: ['<all_urls>'],
+    action: {
+      default_title: '__MSG_extensionName__',
+    },
     commands: {
       'toggle-page-translation': {
         suggested_key: {
           default: 'Alt+Shift+L',
         },
-        description: 'Translate the current page or restore the original',
+        description: '__MSG_toggleCommandDescription__',
       },
     },
     browser_specific_settings: {

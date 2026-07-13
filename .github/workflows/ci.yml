@@ -41,3 +41,6 @@ jobs:
 
       - name: Build
         run: pnpm -s build
+
+      - name: Build Firefox
+        run: pnpm -s build:firefox

@@ -1,3 +1,4 @@
+import { changeInterfaceLanguage, translate } from '@/lib/i18n/i18n';
 import { isExtensionMessage } from '@/lib/messaging/messages';
 import { createTranslationPortClient } from '@/lib/messaging/translation-port';
 import { startAutomaticTranslation } from '@/lib/page-translation/automatic-session';
@@ -19,6 +20,7 @@ export default defineContentScript({
       document,
       isTopFrame: window.top === window,
       pageTranslation,
+      translate,
     });
 
     browser.runtime.onMessage.addListener((message) => {
@@ -38,10 +40,15 @@ export default defineContentScript({
       }
     });
 
-    void getSettings().then((settings) => floatingControl.update(settings));
-    const unwatchSettings = watchSettings((settings) =>
-      floatingControl.update(settings),
-    );
+    void getSettings().then(async (settings) => {
+      await changeInterfaceLanguage(settings.uiLocale);
+      floatingControl.update(settings);
+    });
+    const unwatchSettings = watchSettings((settings) => {
+      void changeInterfaceLanguage(settings.uiLocale).then(() =>
+        floatingControl.update(settings),
+      );
+    });
     void startAutomaticTranslation(pageTranslation, document).catch(
       () => undefined,
     );
