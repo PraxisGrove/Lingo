@@ -42,7 +42,9 @@ export function createLogger(
       return;
     }
 
-    const args = context ? [prefix, message, context] : [prefix, message];
+    const args = context
+      ? [prefix, message, serializeLogContext(context)]
+      : [prefix, message];
     console[messageLevel](...args);
   }
 
@@ -60,4 +62,25 @@ export function createLogger(
       write('error', message, context);
     },
   };
+}
+
+function serializeLogContext(context: LogContext): string {
+  const seen = new WeakSet<object>();
+  return JSON.stringify(context, (_key, value: unknown) => {
+    if (typeof value === 'bigint') return value.toString();
+    if (typeof value !== 'object' || value === null) return value;
+    if (seen.has(value)) return '[Circular]';
+    seen.add(value);
+
+    if (value instanceof Error) {
+      return {
+        ...value,
+        name: value.name,
+        message: value.message,
+        stack: value.stack,
+      };
+    }
+
+    return value;
+  });
 }

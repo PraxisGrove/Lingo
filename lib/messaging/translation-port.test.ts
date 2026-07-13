@@ -130,6 +130,75 @@ describe('translation port protocol', () => {
     expect(connections).toBe(2);
   });
 
+  it('shares one replacement port across concurrent requests', async () => {
+    const disconnectListeners = new Set<() => void>();
+    const initialPort: TranslationRuntimePort = {
+      name: TRANSLATION_PORT_NAME,
+      onMessage: { addListener() {}, removeListener() {} },
+      onDisconnect: {
+        addListener: (listener) => disconnectListeners.add(listener),
+        removeListener: (listener) => disconnectListeners.delete(listener),
+      },
+      postMessage() {},
+      disconnect() {},
+    };
+    const replacementPort = createCompletedPort();
+    let connections = 0;
+    let session = 0;
+    const client = createTranslationPortClient(
+      () => (connections++ === 0 ? initialPort : replacementPort),
+      () => `session-${++session}`,
+      () => undefined,
+    );
+
+    const first = client.translate(
+      [{ id: 'paragraph-1', number: 1, text: 'Hello' }],
+      'zh-CN',
+    );
+    const second = client.translate(
+      [{ id: 'paragraph-2', number: 2, text: 'World' }],
+      'zh-CN',
+    );
+    for (const listener of [...disconnectListeners]) listener();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([[], []]);
+    expect(connections).toBe(2);
+  });
+
+  it('rejects the request when reconnecting throws', async () => {
+    const disconnectListeners = new Set<() => void>();
+    const port: TranslationRuntimePort = {
+      name: TRANSLATION_PORT_NAME,
+      onMessage: { addListener() {}, removeListener() {} },
+      onDisconnect: {
+        addListener: (listener) => disconnectListeners.add(listener),
+        removeListener: (listener) => disconnectListeners.delete(listener),
+      },
+      postMessage() {},
+      disconnect() {},
+    };
+    let connections = 0;
+    const client = createTranslationPortClient(
+      () => {
+        if (connections++ === 0) return port;
+        throw new Error('Extension context invalidated.');
+      },
+      () => 'session-1',
+      () => undefined,
+    );
+    const translation = client.translate(
+      [{ id: 'paragraph-1', number: 1, text: 'Hello' }],
+      'zh-CN',
+    );
+
+    expect(() => {
+      for (const listener of [...disconnectListeners]) listener();
+    }).not.toThrow();
+    await expect(translation).rejects.toThrow(
+      'Translation connection closed: Extension context invalidated.',
+    );
+  });
+
   it('rejects completed requests that contain categorized failures', async () => {
     const client = createTranslationPortClient(
       createFailedPort,
