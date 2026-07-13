@@ -36,7 +36,7 @@ describe('translation port protocol', () => {
   });
 
   it('accepts a versioned translation request without credentials', () => {
-    expect(TRANSLATION_PORT_NAME).toBe('lingo-translation-v2');
+    expect(TRANSLATION_PORT_NAME).toBe('lingo-translation-v3');
     expect(
       isTranslationPortRequest({
         type: 'translate',
@@ -129,7 +129,141 @@ describe('translation port protocol', () => {
     await expect(client.translate([], 'zh-CN')).resolves.toEqual([]);
     expect(connections).toBe(2);
   });
+
+  it('rejects completed requests that contain categorized failures', async () => {
+    const client = createTranslationPortClient(
+      createFailedPort,
+      () => 'session-1',
+    );
+
+    await expect(
+      client.translate(
+        [{ id: 'paragraph-1', number: 1, text: 'Hello' }],
+        'zh-CN',
+      ),
+    ).rejects.toMatchObject({
+      category: 'quota',
+      message: 'The provider balance is insufficient.',
+    });
+  });
+
+  it('returns translated paragraphs alongside partial failures', async () => {
+    const client = createTranslationPortClient(
+      createPartialPort,
+      () => 'session-1',
+    );
+
+    await expect(
+      client.translate(
+        [
+          { id: 'paragraph-1', number: 1, text: 'Hello' },
+          { id: 'paragraph-2', number: 2, text: 'World' },
+        ],
+        'zh-CN',
+      ),
+    ).resolves.toEqual({
+      translations: [{ id: 'paragraph-1', number: 1, text: '你好' }],
+      failures: [
+        {
+          unitId: 'paragraph-2',
+          category: 'rate-limit',
+          message: 'Try again later.',
+        },
+      ],
+    });
+  });
 });
+
+function createPartialPort(): TranslationRuntimePort {
+  const messageListeners = new Set<(message: unknown) => void>();
+  return {
+    name: TRANSLATION_PORT_NAME,
+    onMessage: {
+      addListener: (listener) => messageListeners.add(listener),
+      removeListener: (listener) => messageListeners.delete(listener),
+    },
+    onDisconnect: { addListener() {}, removeListener() {} },
+    postMessage(message) {
+      const request = message as {
+        request: { sessionId: string; pageRevision: number };
+      };
+      queueMicrotask(() => {
+        const common = {
+          sessionId: request.request.sessionId,
+          pageRevision: request.request.pageRevision,
+        };
+        for (const listener of messageListeners) {
+          listener({
+            type: 'translation-event',
+            event: {
+              type: 'translated',
+              ...common,
+              unitId: 'paragraph-1',
+              text: '你好',
+            },
+          });
+          listener({
+            type: 'translation-event',
+            event: {
+              type: 'failed',
+              ...common,
+              unitId: 'paragraph-2',
+              category: 'rate-limit',
+              message: 'Try again later.',
+            },
+          });
+          listener({
+            type: 'translation-event',
+            event: { type: 'completed', ...common, unitId: null },
+          });
+        }
+      });
+    },
+    disconnect() {},
+  };
+}
+
+function createFailedPort(): TranslationRuntimePort {
+  const messageListeners = new Set<(message: unknown) => void>();
+  return {
+    name: TRANSLATION_PORT_NAME,
+    onMessage: {
+      addListener: (listener) => messageListeners.add(listener),
+      removeListener: (listener) => messageListeners.delete(listener),
+    },
+    onDisconnect: { addListener() {}, removeListener() {} },
+    postMessage(message) {
+      const request = message as {
+        request: { sessionId: string; pageRevision: number };
+      };
+      queueMicrotask(() => {
+        for (const listener of messageListeners) {
+          listener({
+            type: 'translation-event',
+            event: {
+              type: 'failed',
+              sessionId: request.request.sessionId,
+              pageRevision: request.request.pageRevision,
+              unitId: 'paragraph-1',
+              category: 'quota',
+              message: 'The provider balance is insufficient.',
+            },
+          });
+          listener({
+            type: 'translation-event',
+            event: {
+              type: 'completed',
+              sessionId: request.request.sessionId,
+              pageRevision: request.request.pageRevision,
+              unitId: null,
+            },
+          });
+        }
+      });
+    },
+    disconnect() {},
+  };
+}
 
 function createCompletedPort(): TranslationRuntimePort {
   const messageListeners = new Set<(message: unknown) => void>();

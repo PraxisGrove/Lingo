@@ -10,6 +10,12 @@ export type TranslationCache = {
   get(key: TranslationCacheKey): Promise<string | undefined>;
   set(key: TranslationCacheKey, text: string): Promise<void>;
   clear(): Promise<void>;
+  stats(): Promise<TranslationCacheStats>;
+};
+
+export type TranslationCacheStats = {
+  entryCount: number;
+  byteSize: number;
 };
 
 export function createConditionalTranslationCache(
@@ -24,6 +30,7 @@ export function createConditionalTranslationCache(
       if (await enabled()) await cache.set(key, text);
     },
     clear: () => cache.clear(),
+    stats: () => cache.stats(),
   };
 }
 
@@ -71,6 +78,13 @@ export function createTranslationCache(
       }
     },
     clear: () => store.clear(),
+    async stats() {
+      const entries = await store.entries();
+      return {
+        entryCount: entries.length,
+        byteSize: entries.reduce((sum, entry) => sum + entry.size, 0),
+      };
+    },
   };
 }
 

@@ -15,6 +15,25 @@ function createStore() {
 }
 
 describe('TranslationCache', () => {
+  it('reports local entry count and byte usage', async () => {
+    const cache = createTranslationCache(createStore());
+    const key = (text: string) => ({
+      providerId: 'personal',
+      sourceLanguage: 'en',
+      targetLanguage: 'zh-CN',
+      qualityVersion: 'quality-v1:123',
+      text,
+    });
+
+    await cache.set(key('one'), 'a');
+    await cache.set(key('two'), '你好');
+
+    await expect(cache.stats()).resolves.toEqual({
+      entryCount: 2,
+      byteSize: 7,
+    });
+  });
+
   it('isolates entries by provider and language', async () => {
     const cache = createTranslationCache(createStore());
     await cache.set(

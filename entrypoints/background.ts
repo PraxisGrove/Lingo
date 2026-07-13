@@ -1,21 +1,27 @@
 import {
+  createPageActions,
+  PAGE_CONTEXT_MENUS,
+} from '@/lib/browser/page-actions';
+import {
   createConditionalTranslationCache,
   createTranslationCache,
 } from '@/lib/cache/translation-cache';
+import { createDiagnosticReport } from '@/lib/diagnostics/diagnostics';
 import { createLogger } from '@/lib/logger/logger';
-import { isExtensionMessage } from '@/lib/messaging/messages';
+import { createMessage, isExtensionMessage } from '@/lib/messaging/messages';
 import {
   serveTranslationPort,
   TRANSLATION_PORT_NAME,
 } from '@/lib/messaging/translation-port';
 import {
+  deleteProviderProfile,
   getActiveProviderChain,
   saveProviderProfile,
   testProviderProfile,
 } from '@/lib/providers/provider-service';
 import { getSettings } from '@/lib/storage/settings';
 import { createTranslationOrchestrator } from '@/lib/translation/orchestrator';
-import { resolveTranslationQuality } from '@/lib/translation/quality';
+import { resolveRequestQuality } from '@/lib/translation/request-quality';
 
 export default defineBackground(() => {
   const logger = createLogger('background');
@@ -25,11 +31,63 @@ export default defineBackground(() => {
       translationCache,
       async () => (await getSettings()).translationCacheEnabled,
     ),
-    quality: async () =>
-      resolveTranslationQuality((await getSettings()).translationQuality),
+    quality: async (request) => {
+      const settings = await getSettings();
+      return resolveRequestQuality(settings, request.siteHostname);
+    },
+  });
+  const pageActions = createPageActions({
+    async getActiveTabId() {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      return tab?.id;
+    },
+    getTargetLanguage: async () => (await getSettings()).targetLanguage,
+    getSnapshot: (tabId) =>
+      browser.tabs.sendMessage(tabId, createMessage('getPageTranslation', {})),
+    start: (tabId, options) =>
+      browser.tabs.sendMessage(
+        tabId,
+        createMessage('startPageTranslation', options),
+      ),
+    update: (tabId, patch) =>
+      browser.tabs.sendMessage(
+        tabId,
+        createMessage('updatePageTranslation', patch),
+      ),
+    stop: (tabId) =>
+      browser.tabs.sendMessage(tabId, createMessage('stopPageTranslation', {})),
   });
 
   logger.info('Background service worker started.');
+
+  browser.runtime.onInstalled.addListener(() => {
+    void installContextMenus().catch((error) => {
+      logger.error('Could not install context menus.', { error });
+    });
+  });
+
+  browser.commands.onCommand.addListener((command) => {
+    if (command !== 'toggle-page-translation') return;
+    void pageActions
+      .run('toggle')
+      .catch((error) =>
+        logger.error('Keyboard translation command failed.', { error }),
+      );
+  });
+
+  browser.contextMenus.onClicked.addListener((info, tab) => {
+    if (tab?.id === undefined) return;
+    const item = PAGE_CONTEXT_MENUS.find(
+      (candidate) => candidate.id === info.menuItemId,
+    );
+    if (!item) return;
+    void pageActions.run(item.action, tab.id).catch((error) => {
+      logger.error('Context menu translation command failed.', { error });
+    });
+  });
 
   browser.runtime.onMessage.addListener((message) => {
     if (!isExtensionMessage(message)) {
@@ -67,8 +125,39 @@ export default defineBackground(() => {
       })();
     }
 
+    if (message.type === 'deleteProviderProfile') {
+      return deleteProviderProfile(message.payload.profileId).then(() => ({
+        ok: true as const,
+      }));
+    }
+
     if (message.type === 'clearTranslationCache') {
       return translationCache.clear().then(() => ({ ok: true as const }));
+    }
+
+    if (message.type === 'getExtensionStatus') {
+      return Promise.all([hasHostPermission(), translationCache.stats()]).then(
+        ([hostPermissionGranted, cache]) => ({
+          hostPermissionGranted,
+          cache,
+        }),
+      );
+    }
+
+    if (message.type === 'exportDiagnostics') {
+      return Promise.all([
+        getSettings(),
+        hasHostPermission(),
+        translationCache.stats(),
+      ]).then(([settings, hostPermissionGranted, cache]) =>
+        createDiagnosticReport({
+          extensionVersion: browser.runtime.getManifest().version,
+          generatedAt: new Date().toISOString(),
+          hostPermissionGranted,
+          cache,
+          settings,
+        }),
+      );
     }
 
     return undefined;
@@ -81,3 +170,18 @@ export default defineBackground(() => {
     });
   });
 });
+
+async function hasHostPermission(): Promise<boolean> {
+  return browser.permissions.contains({ origins: ['<all_urls>'] });
+}
+
+async function installContextMenus(): Promise<void> {
+  await browser.contextMenus.removeAll();
+  for (const item of PAGE_CONTEXT_MENUS) {
+    browser.contextMenus.create({
+      id: item.id,
+      title: item.title,
+      contexts: ['page'],
+    });
+  }
+}

@@ -1,4 +1,5 @@
 import { storage } from '@wxt-dev/storage';
+import type { SiteTranslationPolicy } from '../preferences/preference-resolver';
 import {
   exportUserRules,
   importUserRules,
@@ -34,7 +35,47 @@ export function createUserRuleStore(item?: RuleItem) {
     async export(): Promise<string> {
       return exportUserRules(await this.get());
     },
+    async translationPolicyFor(
+      hostname: string,
+    ): Promise<SiteTranslationPolicy> {
+      return (
+        (await this.get()).rules.find(
+          (rule) => rule.domain === hostname.toLowerCase(),
+        )?.translationPolicy ?? 'default'
+      );
+    },
+    async setTranslationPolicy(
+      hostname: string,
+      translationPolicy: SiteTranslationPolicy,
+    ): Promise<RuleSet> {
+      const current = await this.get();
+      const domain = hostname.toLowerCase();
+      const existing = current.rules.find((rule) => rule.domain === domain);
+      const rules = existing
+        ? current.rules.map((rule) =>
+            rule === existing ? { ...rule, translationPolicy } : rule,
+          )
+        : [
+            ...current.rules,
+            {
+              id: siteRuleId(domain),
+              domain,
+              translationPolicy,
+            },
+          ];
+      return this.set({ schemaVersion: 1, rules });
+    },
   };
+}
+
+function siteRuleId(domain: string): string {
+  const slug = domain.replace(/[^a-z0-9]+/g, '-').slice(0, 44);
+  let hash = 2166136261;
+  for (const character of domain) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `site-${slug}-${(hash >>> 0).toString(16)}`;
 }
 
 function getRuleItem(): RuleItem {

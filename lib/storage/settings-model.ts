@@ -4,13 +4,14 @@ import type {
 } from '@/lib/preferences/preference-resolver';
 import {
   DEFAULT_TRANSLATION_QUALITY,
+  type GlossaryEntry,
   resolveTranslationQuality,
   type TranslationQualitySettings,
 } from '../translation/quality';
 
 export type ExtensionTheme = 'system' | 'light' | 'dark';
 
-export const CURRENT_SETTINGS_SCHEMA_VERSION = 5 as const;
+export const CURRENT_SETTINGS_SCHEMA_VERSION = 7 as const;
 
 export type ProviderKind =
   | 'openai-compatible'
@@ -38,7 +39,9 @@ export type ExtensionSettings = {
   activeProviderProfileId: string | null;
   fallbackProviderProfileIds: string[];
   translationCacheEnabled: boolean;
+  floatingButtonEnabled: boolean;
   translationQuality: TranslationQualitySettings;
+  siteGlossaries: Record<string, GlossaryEntry[]>;
   autoTranslation: AutoTranslationPreferences;
   setupCompleted: boolean;
 };
@@ -53,7 +56,9 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   activeProviderProfileId: null,
   fallbackProviderProfileIds: [],
   translationCacheEnabled: true,
+  floatingButtonEnabled: false,
   translationQuality: DEFAULT_TRANSLATION_QUALITY,
+  siteGlossaries: {},
   autoTranslation: {
     enabled: true,
     defaultAutoSitesEnabled: true,
@@ -76,6 +81,8 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
     candidate.schemaVersion !== 2 &&
     candidate.schemaVersion !== 3 &&
     candidate.schemaVersion !== 4 &&
+    candidate.schemaVersion !== 5 &&
+    candidate.schemaVersion !== 6 &&
     candidate.schemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION
   ) {
     return DEFAULT_SETTINGS;
@@ -122,10 +129,37 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
       typeof candidate.translationCacheEnabled === 'boolean'
         ? candidate.translationCacheEnabled
         : DEFAULT_SETTINGS.translationCacheEnabled,
+    floatingButtonEnabled:
+      typeof candidate.floatingButtonEnabled === 'boolean'
+        ? candidate.floatingButtonEnabled
+        : DEFAULT_SETTINGS.floatingButtonEnabled,
     translationQuality: resolveQualitySettings(candidate.translationQuality),
+    siteGlossaries: resolveSiteGlossaries(candidate.siteGlossaries),
     autoTranslation: resolveAutoTranslation(candidate.autoTranslation),
     setupCompleted: candidate.setupCompleted === true,
   };
+}
+
+function resolveSiteGlossaries(
+  value: unknown,
+): Record<string, GlossaryEntry[]> {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const glossaries: Record<string, GlossaryEntry[]> = {};
+  for (const [rawHostname, glossary] of Object.entries(value)) {
+    const hostname = rawHostname.toLowerCase();
+    if (
+      !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(
+        hostname,
+      )
+    ) {
+      continue;
+    }
+    const normalized = resolveTranslationQuality({ glossary }).glossary;
+    if (normalized.length > 0) glossaries[hostname] = normalized;
+  }
+  return glossaries;
 }
 
 function resolveQualitySettings(value: unknown): TranslationQualitySettings {

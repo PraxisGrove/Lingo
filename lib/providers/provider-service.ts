@@ -110,6 +110,49 @@ export async function saveProviderProfile(
   });
 }
 
+type DeleteProviderDependencies = {
+  getSettings(): Promise<ExtensionSettings>;
+  setSettings(
+    patch: Partial<Omit<ExtensionSettings, 'schemaVersion'>>,
+  ): Promise<unknown>;
+  removeCredential(profileId: string): Promise<void>;
+};
+
+export async function deleteProviderProfile(
+  profileId: string,
+  dependencies?: DeleteProviderDependencies,
+): Promise<void> {
+  const resolved = dependencies ?? (await deleteProviderDependencies());
+  const settings = await resolved.getSettings();
+  const providerProfiles = settings.providerProfiles.filter(
+    (profile) => profile.id !== profileId,
+  );
+  const activeProviderProfileId =
+    settings.activeProviderProfileId === profileId
+      ? (providerProfiles[0]?.id ?? null)
+      : settings.activeProviderProfileId;
+  const fallbackProviderProfileIds = settings.fallbackProviderProfileIds.filter(
+    (id) => id !== profileId && id !== activeProviderProfileId,
+  );
+  await resolved.removeCredential(profileId);
+  await resolved.setSettings({
+    providerProfiles,
+    activeProviderProfileId,
+    fallbackProviderProfileIds,
+  });
+}
+
+async function deleteProviderDependencies(): Promise<DeleteProviderDependencies> {
+  const [{ credentialStore }, { getSettings, setSettings }] = await Promise.all(
+    [import('../storage/credentials'), import('../storage/settings')],
+  );
+  return {
+    getSettings,
+    setSettings,
+    removeCredential: (profileId) => credentialStore.remove(profileId),
+  };
+}
+
 export const activeProvider: TranslationProvider = {
   capabilities: {
     maxBatchSize: 50,

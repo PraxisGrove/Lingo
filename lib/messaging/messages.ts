@@ -1,3 +1,5 @@
+import type { TranslationCacheStats } from '@/lib/cache/translation-cache';
+import type { DiagnosticReport } from '@/lib/diagnostics/diagnostics';
 import type {
   DisplayMode,
   SessionSnapshot as PageTranslationSnapshot,
@@ -34,6 +36,7 @@ export type ExtensionMessages = {
     request: {
       displayMode: DisplayMode;
       translateImmediately?: boolean;
+      retryFailed?: boolean;
     };
     response: PageTranslationSnapshot;
   };
@@ -49,9 +52,24 @@ export type ExtensionMessages = {
     request: { profile: ProviderProfile; credential: string };
     response: { ok: true } | { ok: false; category: string; message: string };
   };
+  deleteProviderProfile: {
+    request: { profileId: string };
+    response: { ok: true };
+  };
   clearTranslationCache: {
     request: Record<string, never>;
     response: { ok: true };
+  };
+  getExtensionStatus: {
+    request: Record<string, never>;
+    response: {
+      hostPermissionGranted: boolean;
+      cache: TranslationCacheStats;
+    };
+  };
+  exportDiagnostics: {
+    request: Record<string, never>;
+    response: DiagnosticReport;
   };
 };
 
@@ -87,6 +105,8 @@ export function isExtensionMessage(
     case 'getPageTranslation':
     case 'stopPageTranslation':
     case 'clearTranslationCache':
+    case 'getExtensionStatus':
+    case 'exportDiagnostics':
       return isRecordWithKeys(message.payload, []);
     case 'startPageTranslation':
       return (
@@ -109,11 +129,13 @@ export function isExtensionMessage(
         isRecordWithRequiredAndOptionalKeys(
           message.payload,
           ['displayMode'],
-          ['translateImmediately'],
+          ['translateImmediately', 'retryFailed'],
         ) &&
         isDisplayMode(message.payload.displayMode) &&
         (message.payload.translateImmediately === undefined ||
-          typeof message.payload.translateImmediately === 'boolean')
+          typeof message.payload.translateImmediately === 'boolean') &&
+        (message.payload.retryFailed === undefined ||
+          typeof message.payload.retryFailed === 'boolean')
       );
     case 'saveProviderProfile':
       return (
@@ -126,6 +148,11 @@ export function isExtensionMessage(
         isRecordWithKeys(message.payload, ['profile', 'credential']) &&
         isProviderProfile(message.payload.profile) &&
         typeof message.payload.credential === 'string'
+      );
+    case 'deleteProviderProfile':
+      return (
+        isRecordWithKeys(message.payload, ['profileId']) &&
+        typeof message.payload.profileId === 'string'
       );
     default:
       return false;

@@ -1,11 +1,15 @@
 import type {
+  TranslationClientFailure,
+  TranslationClientResult,
+} from '@/lib/page-translation/page-translation';
+import type {
   TranslationEvent,
   TranslationOrchestrator,
   TranslationRequest,
   TranslationUnit,
 } from '@/lib/translation/types';
 
-export const TRANSLATION_PORT_NAME = 'lingo-translation-v2';
+export const TRANSLATION_PORT_NAME = 'lingo-translation-v3';
 
 export type TranslationPortRequest = {
   type: 'translate';
@@ -38,7 +42,7 @@ export function isTranslationPortRequest(
         'targetLanguage',
         'units',
       ],
-      ['pageTitle'],
+      ['pageTitle', 'siteHostname'],
     ) &&
     typeof request.sessionId === 'string' &&
     Number.isInteger(request.pageRevision) &&
@@ -46,6 +50,8 @@ export function isTranslationPortRequest(
     typeof request.targetLanguage === 'string' &&
     (request.pageTitle === undefined ||
       typeof request.pageTitle === 'string') &&
+    (request.siteHostname === undefined ||
+      typeof request.siteHostname === 'string') &&
     Array.isArray(request.units) &&
     request.units.every(isTranslationUnit)
   );
@@ -89,8 +95,14 @@ function isTranslationEvent(value: unknown): value is TranslationEvent {
       );
     case 'failed':
       return (
-        isRecordWithKeys(event, [...commonKeys, 'unitId', 'message']) &&
+        isRecordWithKeys(event, [
+          ...commonKeys,
+          'unitId',
+          'category',
+          'message',
+        ]) &&
         typeof event.unitId === 'string' &&
+        typeof event.category === 'string' &&
         typeof event.message === 'string'
       );
     case 'paused':
@@ -150,7 +162,7 @@ export type TranslationPortClient = {
   translate(
     units: TranslationUnit[],
     targetLanguage: string,
-  ): Promise<TranslationUnit[]>;
+  ): Promise<TranslationClientResult>;
   disconnect(): void;
 };
 
@@ -176,6 +188,8 @@ export function createTranslationPortClient(
     browser.runtime.lastError?.message,
   getPageTitle: () => string = () =>
     typeof document === 'undefined' ? '' : document.title,
+  getSiteHostname: () => string = () =>
+    typeof location === 'undefined' ? '' : location.hostname,
 ): TranslationPortClient {
   let port: TranslationRuntimePort | undefined;
   let disconnected = false;
@@ -202,6 +216,7 @@ export function createTranslationPortClient(
 
       return new Promise((resolve, reject) => {
         const translations: TranslationUnit[] = [];
+        const failures: TranslationClientFailure[] = [];
         let reconnectAttempts = 0;
         let listenerPort = activePort;
 
@@ -233,7 +248,17 @@ export function createTranslationPortClient(
             if (unit) translations.push({ ...unit, text: event.text });
           } else if (event.type === 'completed') {
             cleanup();
-            resolve(translations);
+            const failure = failures[0];
+            if (failure && translations.length === 0) {
+              reject(translationError(failure));
+            } else if (failure) resolve({ translations, failures });
+            else resolve(translations);
+          } else if (event.type === 'failed') {
+            failures.push({
+              unitId: event.unitId,
+              category: event.category,
+              message: event.message,
+            });
           } else if (event.type === 'paused') {
             cleanup();
             reject(new Error(event.reason));
@@ -252,6 +277,7 @@ export function createTranslationPortClient(
               sourceLanguage: 'auto',
               targetLanguage,
               pageTitle: getPageTitle(),
+              siteHostname: getSiteHostname(),
               units,
             },
           } satisfies TranslationPortRequest);
@@ -271,6 +297,15 @@ export function createTranslationPortClient(
 
 function disconnectError(reason: string): Error {
   return new Error(`Translation connection closed: ${reason}`);
+}
+
+function translationError(failure: {
+  category: string;
+  message: string;
+}): Error & { category: string } {
+  return Object.assign(new Error(failure.message), {
+    category: failure.category,
+  });
 }
 
 export function serveTranslationPort(
@@ -301,6 +336,40 @@ export function serveTranslationPort(
       } finally {
         activeSessions.delete(message.request.sessionId);
       }
-    })().catch(onError);
+    })().catch((error) => {
+      onError(error);
+      for (const unit of message.request.units) {
+        port.postMessage({
+          type: 'translation-event',
+          event: {
+            type: 'failed',
+            sessionId: message.request.sessionId,
+            pageRevision: message.request.pageRevision,
+            unitId: unit.id,
+            category: errorCategory(error),
+            message:
+              error instanceof Error ? error.message : 'Translation failed.',
+          },
+        } satisfies TranslationPortResponse);
+      }
+      port.postMessage({
+        type: 'translation-event',
+        event: {
+          type: 'completed',
+          sessionId: message.request.sessionId,
+          pageRevision: message.request.pageRevision,
+          unitId: null,
+        },
+      } satisfies TranslationPortResponse);
+    });
   });
+}
+
+function errorCategory(error: unknown): string {
+  return typeof error === 'object' &&
+    error !== null &&
+    'category' in error &&
+    typeof error.category === 'string'
+    ? error.category
+    : 'unknown';
 }

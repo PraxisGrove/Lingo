@@ -46,5 +46,26 @@ describe('messages', () => {
         },
       }),
     ).toBe(true);
+    expect(
+      isExtensionMessage({
+        type: 'deleteProviderProfile',
+        payload: { profileId: 'work' },
+      }),
+    ).toBe(true);
+  });
+
+  it('validates read-only extension status commands', () => {
+    expect(
+      isExtensionMessage({ type: 'getExtensionStatus', payload: {} }),
+    ).toBe(true);
+    expect(isExtensionMessage({ type: 'exportDiagnostics', payload: {} })).toBe(
+      true,
+    );
+    expect(
+      isExtensionMessage({
+        type: 'exportDiagnostics',
+        payload: { includeCredentials: true },
+      }),
+    ).toBe(false);
   });
 });

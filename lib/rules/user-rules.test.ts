@@ -32,4 +32,34 @@ describe('user rule store', () => {
     );
     expect((await store.get()).rules).toHaveLength(1);
   });
+
+  it('updates an exact site policy without discarding other rule fields', async () => {
+    let value: RuleSet = {
+      schemaVersion: 1,
+      rules: [
+        {
+          id: 'docs',
+          domain: 'docs.example.com',
+          selectors: { main: ['main'] },
+          translationPolicy: 'never',
+        },
+      ],
+    };
+    const store = createUserRuleStore({
+      getValue: async () => value,
+      setValue: async (next) => {
+        value = next;
+      },
+    });
+
+    expect(await store.translationPolicyFor('docs.example.com')).toBe('never');
+    await store.setTranslationPolicy('docs.example.com', 'always');
+
+    expect(value.rules[0]).toEqual({
+      id: 'docs',
+      domain: 'docs.example.com',
+      selectors: { main: ['main'] },
+      translationPolicy: 'always',
+    });
+  });
 });

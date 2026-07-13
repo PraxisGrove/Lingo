@@ -44,7 +44,7 @@ export type TranslationOrchestratorOptions = {
   timeoutMs?: number;
   maxAttempts?: number;
   wait?: (milliseconds: number) => Promise<void>;
-  quality?: () => Promise<TranslationQuality>;
+  quality?: (request: TranslationRequest) => Promise<TranslationQuality>;
 };
 
 export type TranslationProviderResolver = () => Promise<TranslationProvider[]>;
@@ -67,7 +67,7 @@ export function createTranslationOrchestrator(
         yield eventForUnit(request, unit.id, 'queued');
       }
       const quality = options.quality
-        ? await options.quality()
+        ? await options.quality(request)
         : resolveTranslationQuality();
 
       const outcomes = await translateUnits(
@@ -101,6 +101,7 @@ export function createTranslationOrchestrator(
         } else {
           yield {
             ...eventForUnit(request, outcome.unitId, 'failed'),
+            category: outcome.category,
             message: outcome.message,
           };
         }
@@ -121,7 +122,7 @@ export function createTranslationOrchestrator(
 
 type Outcome =
   | { type: 'translated'; unitId: string; text: string }
-  | { type: 'failed'; unitId: string; message: string }
+  | { type: 'failed'; unitId: string; category: string; message: string }
   | { type: 'paused'; unitId: null; reason: string };
 
 const MAX_CONTEXT_UNIT_CHARACTERS = 600;
@@ -183,6 +184,7 @@ async function translateUnits(
               found.push({
                 type: 'failed',
                 unitId: unit.id,
+                category: 'invalid-response',
                 message: 'The translation provider did not return this unit.',
               });
             } else {
@@ -206,6 +208,7 @@ async function translateUnits(
           return units.map((unit) => ({
             type: 'failed' as const,
             unitId: unit.id,
+            category: category(error) ?? 'unknown',
             message: errorMessage(error),
           }));
         }

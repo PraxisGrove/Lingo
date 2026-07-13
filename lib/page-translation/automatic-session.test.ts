@@ -114,6 +114,8 @@ function pageTranslation(starts: StartSessionOptions[]): PageTranslation {
         status: 'translated',
         displayMode: options.displayMode,
         translatedUnitCount: 0,
+        failedUnitCount: 0,
+        totalUnitCount: 0,
         pageRevision: 0,
       };
     },
@@ -121,6 +123,8 @@ function pageTranslation(starts: StartSessionOptions[]): PageTranslation {
       status: 'idle',
       displayMode: 'bilingual',
       translatedUnitCount: 0,
+      failedUnitCount: 0,
+      totalUnitCount: 0,
       pageRevision: 0,
     }),
     stop: async () => undefined,
@@ -129,6 +133,8 @@ function pageTranslation(starts: StartSessionOptions[]): PageTranslation {
       status: 'idle',
       displayMode: 'bilingual',
       translatedUnitCount: 0,
+      failedUnitCount: 0,
+      totalUnitCount: 0,
       pageRevision: 0,
     }),
   };

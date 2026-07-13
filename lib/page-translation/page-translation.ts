@@ -13,13 +13,33 @@ export type StartSessionOptions = {
 export type SessionPatch = {
   displayMode: DisplayMode;
   translateImmediately?: boolean;
+  retryFailed?: boolean;
 };
 
+export type TranslationClientFailure = {
+  unitId: string;
+  category: string;
+  message: string;
+};
+
+export type TranslationClientResult =
+  | TranslationUnit[]
+  | {
+      translations: TranslationUnit[];
+      failures: TranslationClientFailure[];
+    };
+
 export type SessionSnapshot = {
-  status: 'idle' | 'translating' | 'translated';
+  status: 'idle' | 'translating' | 'translated' | 'failed';
   displayMode: DisplayMode;
   translatedUnitCount: number;
+  failedUnitCount: number;
+  totalUnitCount: number;
   pageRevision: number;
+  failure?: {
+    category: string;
+    message: string;
+  };
 };
 
 export type PageTranslationEvent = { snapshot: SessionSnapshot };
@@ -35,7 +55,7 @@ export type PageTranslation = {
 type TranslationClient = (
   units: TranslationUnit[],
   targetLanguage: string,
-) => Promise<TranslationUnit[]>;
+) => Promise<TranslationClientResult>;
 
 type PageTranslationDependencies = {
   document: Document;
@@ -104,7 +124,10 @@ export function createPageTranslation({
   const unitIds = new WeakMap<HTMLElement, string>();
   const unitNumbers = new WeakMap<HTMLElement, number>();
   let processed = new WeakSet<HTMLElement>();
+  let knownCandidates = new WeakSet<HTMLElement>();
   const insertedTranslations = new Map<HTMLElement, HTMLElement>();
+  const failedElements = new Set<HTMLElement>();
+  const pausedVisibleElements = new Set<HTMLElement>();
   const pending = new Set<HTMLElement>();
   let nextUnitId = 1;
   let observer: MutationObserver | undefined;
@@ -117,6 +140,8 @@ export function createPageTranslation({
     status: 'idle',
     displayMode: 'bilingual',
     translatedUnitCount: 0,
+    failedUnitCount: 0,
+    totalUnitCount: 0,
     pageRevision: 0,
   };
 
@@ -137,25 +162,54 @@ export function createPageTranslation({
   async function translateElements(elements: HTMLElement[]) {
     const options = activeOptions;
     if (!options) return;
+    if (isGloballyPaused(current)) {
+      for (const element of elements) pausedVisibleElements.add(element);
+      return;
+    }
     const revision = current.pageRevision;
     const token = sessionToken;
-    const candidates = elements
-      .filter((element) => !processed.has(element) && element.isConnected)
-      .map(createCandidate);
-    if (candidates.length === 0) return;
+    const fresh = elements.filter(
+      (element) => !processed.has(element) && element.isConnected,
+    );
+    registerCandidates(fresh);
+    const candidates = fresh.map(createCandidate);
+    if (candidates.length === 0) {
+      if (current.status === 'translating') {
+        publish({ ...current, status: 'translated' });
+      }
+      return;
+    }
     for (const candidate of candidates) {
       processed.add(candidate.element);
       pending.delete(candidate.element);
       intersectionObserver?.unobserve(candidate.element);
     }
-    const translations = await translate(
-      candidates.map(({ id, number, encodedText }) => ({
-        id,
-        number,
-        text: encodedText,
-      })),
-      options.targetLanguage,
-    );
+    let result: TranslationClientResult;
+    try {
+      result = await translate(
+        candidates.map(({ id, number, encodedText }) => ({
+          id,
+          number,
+          text: encodedText,
+        })),
+        options.targetLanguage,
+      );
+    } catch (error) {
+      for (const candidate of candidates) failedElements.add(candidate.element);
+      publish({
+        ...current,
+        status: 'failed',
+        failedUnitCount: failedElements.size,
+        failure: {
+          category: errorCategory(error),
+          message:
+            error instanceof Error ? error.message : 'Translation failed.',
+        },
+      });
+      return;
+    }
+    const translations = Array.isArray(result) ? result : result.translations;
+    const failures = Array.isArray(result) ? [] : result.failures;
     if (
       token !== sessionToken ||
       revision !== current.pageRevision ||
@@ -167,21 +221,49 @@ export function createPageTranslation({
     let inserted = 0;
     for (const candidate of candidates) {
       const text = byId.get(candidate.id);
-      if (text === undefined || !candidate.element.isConnected) continue;
+      if (text === undefined) {
+        failedElements.add(candidate.element);
+        continue;
+      }
+      if (!candidate.element.isConnected) continue;
       const translation = document.createElement(candidate.element.tagName);
       translation.setAttribute(TRANSLATION_ATTRIBUTE, candidate.id);
       translation.lang = options.targetLanguage;
       renderTranslatedContent(translation, text, candidate.inlineElements);
       candidate.element.after(translation);
       insertedTranslations.set(candidate.element, translation);
+      failedElements.delete(candidate.element);
       inserted += 1;
     }
     applyDisplayMode(current.displayMode);
     publish({
       ...current,
-      status: 'translated',
+      status: failures.some((failure) => isBlockingCategory(failure.category))
+        ? 'failed'
+        : 'translated',
       translatedUnitCount: current.translatedUnitCount + inserted,
+      failedUnitCount: failedElements.size,
+      failure:
+        failures[0] ??
+        (failedElements.size > 0
+          ? {
+              category: 'invalid-response',
+              message: 'Some paragraphs did not return a translation.',
+            }
+          : undefined),
     });
+  }
+
+  function registerCandidates(elements: HTMLElement[]) {
+    let added = 0;
+    for (const element of elements) {
+      if (knownCandidates.has(element)) continue;
+      knownCandidates.add(element);
+      added += 1;
+    }
+    if (added > 0) {
+      publish({ ...current, totalUnitCount: current.totalUnitCount + added });
+    }
   }
 
   function createCandidate(element: HTMLElement): Candidate {
@@ -209,6 +291,7 @@ export function createPageTranslation({
   function schedule(elements: HTMLElement[]) {
     for (const element of elements) assignUnitIdentity(element);
     const fresh = elements.filter((element) => !processed.has(element));
+    registerCandidates(fresh);
     if (
       activeOptions?.translateImmediately !== false ||
       !intersectionObserver
@@ -231,11 +314,16 @@ export function createPageTranslation({
       original.removeAttribute(HIDDEN_ATTRIBUTE);
     insertedTranslations.clear();
     pending.clear();
+    failedElements.clear();
+    pausedVisibleElements.clear();
     processed = new WeakSet<HTMLElement>();
+    knownCandidates = new WeakSet<HTMLElement>();
     publish({
       ...current,
       status: 'translating',
       translatedUnitCount: 0,
+      failedUnitCount: 0,
+      totalUnitCount: 0,
       pageRevision: current.pageRevision + 1,
     });
     schedule(findCandidates(document, activeOptions.contentScope ?? 'main'));
@@ -307,6 +395,9 @@ export function createPageTranslation({
         ...current,
         status: 'translating',
         displayMode: options.displayMode,
+        failedUnitCount: 0,
+        totalUnitCount: 0,
+        failure: undefined,
       });
       observePage();
       const candidates = findCandidates(
@@ -323,6 +414,25 @@ export function createPageTranslation({
     async update(patch) {
       if (activeOptions) {
         activeOptions = { ...activeOptions, ...patch };
+        if (patch.retryFailed) {
+          const retry = [...failedElements].filter(
+            (element) => element.isConnected,
+          );
+          failedElements.clear();
+          for (const element of retry) processed.delete(element);
+          publish({
+            ...current,
+            status: 'translating',
+            failedUnitCount: 0,
+            failure: undefined,
+          });
+          await translateElements(retry);
+          if (!isGloballyPaused(current) && pausedVisibleElements.size > 0) {
+            const visible = [...pausedVisibleElements];
+            pausedVisibleElements.clear();
+            await translateElements(visible);
+          }
+        }
         if (patch.translateImmediately) {
           intersectionObserver?.disconnect();
           intersectionObserver = undefined;
@@ -348,11 +458,16 @@ export function createPageTranslation({
         original.removeAttribute(HIDDEN_ATTRIBUTE);
       insertedTranslations.clear();
       pending.clear();
+      failedElements.clear();
+      pausedVisibleElements.clear();
       processed = new WeakSet<HTMLElement>();
+      knownCandidates = new WeakSet<HTMLElement>();
       publish({
         status: 'idle',
         displayMode: 'bilingual',
         translatedUnitCount: 0,
+        failedUnitCount: 0,
+        totalUnitCount: 0,
         pageRevision: current.pageRevision,
       });
     },
@@ -364,6 +479,27 @@ export function createPageTranslation({
       return current;
     },
   };
+}
+
+function errorCategory(error: unknown): string {
+  return typeof error === 'object' &&
+    error !== null &&
+    'category' in error &&
+    typeof error.category === 'string'
+    ? error.category
+    : 'unknown';
+}
+
+function isBlockingCategory(category: string): boolean {
+  return ['authentication', 'quota', 'rate-limit'].includes(category);
+}
+
+function isGloballyPaused(snapshot: SessionSnapshot): boolean {
+  return (
+    snapshot.status === 'failed' &&
+    snapshot.failure !== undefined &&
+    isBlockingCategory(snapshot.failure.category)
+  );
 }
 
 function findCandidates(

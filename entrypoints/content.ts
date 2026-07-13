@@ -2,6 +2,8 @@ import { isExtensionMessage } from '@/lib/messaging/messages';
 import { createTranslationPortClient } from '@/lib/messaging/translation-port';
 import { startAutomaticTranslation } from '@/lib/page-translation/automatic-session';
 import { createPageTranslation } from '@/lib/page-translation/page-translation';
+import { getSettings, watchSettings } from '@/lib/storage/settings';
+import { createFloatingPageControl } from '@/lib/ui/floating-page-control';
 import './page-translation.css';
 
 export default defineContentScript({
@@ -13,10 +15,11 @@ export default defineContentScript({
       document,
       translate: client.translate,
     });
-
-    void startAutomaticTranslation(pageTranslation, document).catch(
-      () => undefined,
-    );
+    const floatingControl = createFloatingPageControl({
+      document,
+      isTopFrame: window.top === window,
+      pageTranslation,
+    });
 
     browser.runtime.onMessage.addListener((message) => {
       if (!isExtensionMessage(message)) return undefined;
@@ -35,8 +38,22 @@ export default defineContentScript({
       }
     });
 
-    window.addEventListener('pagehide', () => client.disconnect(), {
-      once: true,
-    });
+    void getSettings().then((settings) => floatingControl.update(settings));
+    const unwatchSettings = watchSettings((settings) =>
+      floatingControl.update(settings),
+    );
+    void startAutomaticTranslation(pageTranslation, document).catch(
+      () => undefined,
+    );
+
+    window.addEventListener(
+      'pagehide',
+      () => {
+        unwatchSettings();
+        floatingControl.dispose();
+        client.disconnect();
+      },
+      { once: true },
+    );
   },
 });

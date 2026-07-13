@@ -10,6 +10,7 @@ export type TranslationRequest = {
   sourceLanguage: string;
   targetLanguage: string;
   pageTitle?: string;
+  siteHostname?: string;
   units: TranslationUnit[];
 };
 
@@ -32,6 +33,7 @@ export type TranslationEvent =
       sessionId: string;
       pageRevision: number;
       unitId: string;
+      category: string;
       message: string;
     }
   | {

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createPageTranslation as createPageTranslationImplementation,
   type PageTranslation,
@@ -54,6 +54,165 @@ describe('PageTranslation', () => {
       'Chinese: Hello world.',
       'Chinese: This is a static article paragraph.',
     ]);
+  });
+
+  it('counts all queued paragraphs before they enter the viewport', async () => {
+    class PendingIntersectionObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('IntersectionObserver', PendingIntersectionObserver);
+    const pageTranslation = createPageTranslation({
+      document,
+      translate: async (units) => units,
+    });
+
+    const snapshot = await pageTranslation.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+      translateImmediately: false,
+    });
+
+    expect(snapshot).toMatchObject({
+      status: 'translating',
+      translatedUnitCount: 0,
+      totalUnitCount: 2,
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it('pauses newly visible paragraphs after a global provider failure', async () => {
+    let callback: IntersectionObserverCallback = () => undefined;
+    class ControlledIntersectionObserver {
+      constructor(nextCallback: IntersectionObserverCallback) {
+        callback = nextCallback;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('IntersectionObserver', ControlledIntersectionObserver);
+    const translate = vi.fn(async () => {
+      throw Object.assign(new Error('Provider balance exhausted.'), {
+        category: 'quota',
+      });
+    });
+    const pageTranslation = createPageTranslation({ document, translate });
+    await pageTranslation.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+      translateImmediately: false,
+    });
+    const paragraphs = [...document.querySelectorAll('p')];
+
+    callback(
+      [
+        {
+          isIntersecting: true,
+          target: paragraphs[0],
+        } as unknown as IntersectionObserverEntry,
+      ],
+      {} as IntersectionObserver,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pageTranslation.snapshot()).toMatchObject({ status: 'failed' });
+    expect(translate).toHaveBeenCalledTimes(1);
+
+    callback(
+      [
+        {
+          isIntersecting: true,
+          target: paragraphs[1],
+        } as unknown as IntersectionObserverEntry,
+      ],
+      {} as IntersectionObserver,
+    );
+    await Promise.resolve();
+    expect(translate).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps original content and exposes a categorized translation failure', async () => {
+    const pageTranslation = createPageTranslation({
+      document,
+      translate: async () => {
+        throw Object.assign(
+          new Error('The provider balance is insufficient.'),
+          {
+            category: 'quota',
+          },
+        );
+      },
+    });
+
+    const snapshot = await pageTranslation.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+    });
+
+    expect(snapshot).toMatchObject({
+      status: 'failed',
+      failure: {
+        category: 'quota',
+        message: 'The provider balance is insufficient.',
+      },
+    });
+    expect(document.querySelector('[data-lingo-translation]')).toBeNull();
+    expect(document.querySelector('article')?.textContent).toContain(
+      'Hello world.',
+    );
+  });
+
+  it('keeps partial results and retries only failed paragraphs', async () => {
+    let attempt = 0;
+    const translatedBatches: string[][] = [];
+    const pageTranslation = createPageTranslation({
+      document,
+      async translate(units) {
+        translatedBatches.push(units.map((unit) => unit.id));
+        attempt += 1;
+        if (attempt === 1) {
+          return {
+            translations: [{ ...units[0], text: `Chinese: ${units[0].text}` }],
+            failures: [
+              {
+                unitId: units[1].id,
+                category: 'invalid-response',
+                message: 'This paragraph was missing.',
+              },
+            ],
+          };
+        }
+        return units.map((unit) => ({
+          ...unit,
+          text: `Chinese: ${unit.text}`,
+        }));
+      },
+    });
+
+    const partial = await pageTranslation.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+    });
+    expect(partial).toMatchObject({
+      status: 'translated',
+      translatedUnitCount: 1,
+      failedUnitCount: 1,
+      totalUnitCount: 2,
+    });
+
+    const complete = await pageTranslation.update({
+      displayMode: 'bilingual',
+      retryFailed: true,
+    });
+    expect(complete).toMatchObject({
+      translatedUnitCount: 2,
+      failedUnitCount: 0,
+      totalUnitCount: 2,
+    });
+    expect(translatedBatches[1]).toEqual([translatedBatches[0][1]]);
   });
 
   it('restores the original page without removing page-owned changes', async () => {

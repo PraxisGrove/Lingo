@@ -24,6 +24,15 @@ describe('resolveSettings', () => {
     });
   });
 
+  it('keeps the floating button opt-in and defaults it off', () => {
+    expect(resolveSettings({ floatingButtonEnabled: true })).toMatchObject({
+      floatingButtonEnabled: true,
+    });
+    expect(resolveSettings({})).toMatchObject({
+      floatingButtonEnabled: false,
+    });
+  });
+
   it('keeps valid language and provider profile settings', () => {
     expect(
       resolveSettings({
@@ -118,6 +127,21 @@ describe('resolveSettings', () => {
         template: 'concise',
         instruction: 'For product managers.',
         glossary: [{ source: 'Lingo', target: '灵译' }],
+      },
+    });
+  });
+
+  it('normalizes site-scoped glossaries by hostname', () => {
+    expect(
+      resolveSettings({
+        siteGlossaries: {
+          'Docs.Example.com': [{ source: 'API', target: '接口' }],
+          'not a hostname': [{ source: 'Ignored', target: '忽略' }],
+        },
+      }),
+    ).toMatchObject({
+      siteGlossaries: {
+        'docs.example.com': [{ source: 'API', target: '接口' }],
       },
     });
   });

@@ -47,6 +47,43 @@ describe('translation port flow', () => {
     );
     client.disconnect();
   });
+
+  it('returns a recoverable page failure when no provider can be resolved', async () => {
+    document.body.innerHTML =
+      '<article><p>Hello without a provider.</p></article>';
+    const [contentPort, backgroundPort] = createPortPair([]);
+    serveTranslationPort(
+      backgroundPort,
+      createTranslationOrchestrator(async () => {
+        throw Object.assign(
+          new Error('Configure a translation service first.'),
+          {
+            category: 'invalid-request',
+          },
+        );
+      }),
+      () => undefined,
+    );
+    const client = createTranslationPortClient(() => contentPort);
+    const pageTranslation = createPageTranslation({
+      document,
+      translate: client.translate,
+    });
+
+    await expect(
+      pageTranslation.start({
+        targetLanguage: 'zh-CN',
+        displayMode: 'bilingual',
+      }),
+    ).resolves.toMatchObject({
+      status: 'failed',
+      failure: {
+        category: 'invalid-request',
+        message: 'Configure a translation service first.',
+      },
+    });
+    client.disconnect();
+  });
 });
 
 function providerWithCredential(credential: string): TranslationProvider {
