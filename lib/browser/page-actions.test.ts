@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import { SUPPORTED_UI_LOCALES } from '../i18n/locales';
+import { resources } from '../i18n/resources';
 import type { SessionSnapshot } from '../page-translation/page-translation';
-import { createPageActions } from './page-actions';
+import { createPageActions, localizePageContextMenus } from './page-actions';
 
 const IDLE: SessionSnapshot = {
   status: 'idle',
@@ -49,5 +51,17 @@ describe('page actions', () => {
       displayMode: 'bilingual',
       translateImmediately: true,
     });
+  });
+
+  it.each(SUPPORTED_UI_LOCALES)('localizes context menus in %s', (locale) => {
+    const menus = localizePageContextMenus(
+      (key) => (resources[locale].translation as Record<string, string>)[key],
+    );
+
+    expect(menus.map((menu) => menu.title)).toEqual([
+      resources[locale].translation['menu.translate'],
+      resources[locale].translation['menu.translateAll'],
+      resources[locale].translation['menu.restore'],
+    ]);
   });
 });

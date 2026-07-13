@@ -10,6 +10,7 @@ export {
   DEFAULT_SETTINGS,
   type ExtensionSettings,
   type ExtensionTheme,
+  initialSettingsForInstall,
   type ProviderKind,
   type ProviderProfile,
   resolveSettings,

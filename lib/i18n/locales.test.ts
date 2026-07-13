@@ -10,6 +10,8 @@ describe('interface locale resolution', () => {
     ['zh', 'zh-CN'],
     ['zh-SG', 'zh-CN'],
     ['zh-Hant', 'zh-TW'],
+    ['zh-Hant-HK', 'zh-TW'],
+    ['zh-Hans-CN', 'zh-CN'],
     ['zh-HK', 'zh-TW'],
     ['pt-PT', 'pt-BR'],
     ['es-MX', 'es'],

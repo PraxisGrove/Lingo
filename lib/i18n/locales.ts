@@ -16,8 +16,16 @@ export type UiLocalePreference = 'auto' | SupportedUiLocale;
 export function resolveUiLocale(requested: string): SupportedUiLocale {
   const normalized = requested.replace('_', '-');
   const lower = normalized.toLowerCase();
-  if (lower === 'zh-hant' || /^(zh-(tw|hk|mo))\b/.test(lower)) return 'zh-TW';
-  if (lower === 'zh' || /^(zh-(hans|cn|sg))\b/.test(lower)) return 'zh-CN';
+  if (/^zh-hant(?:-|$)/.test(lower) || /^zh-(tw|hk|mo)(?:-|$)/.test(lower)) {
+    return 'zh-TW';
+  }
+  if (
+    lower === 'zh' ||
+    /^zh-hans(?:-|$)/.test(lower) ||
+    /^zh-(cn|sg)(?:-|$)/.test(lower)
+  ) {
+    return 'zh-CN';
+  }
   if (lower === 'pt' || lower.startsWith('pt-')) return 'pt-BR';
   const base = lower.split('-')[0];
   if (

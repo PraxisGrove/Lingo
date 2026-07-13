@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SETTINGS,
+  initialSettingsForInstall,
   resolveSettings,
   targetLanguageForBrowser,
 } from './settings-model';
@@ -72,6 +73,18 @@ describe('resolveSettings', () => {
     ).toMatchObject({ uiLocale: 'auto', targetLanguage: 'ja' });
   });
 
+  it.each([
+    1, 2, 3, 4, 5, 6, 7,
+  ])('migrates schema %s without changing the translation target', (schemaVersion) => {
+    expect(
+      resolveSettings({ schemaVersion, targetLanguage: 'ja' }),
+    ).toMatchObject({
+      schemaVersion: 8,
+      targetLanguage: 'ja',
+      uiLocale: 'auto',
+    });
+  });
+
   it('keeps supported interface language preferences and rejects unknown ones', () => {
     expect(resolveSettings({ uiLocale: 'pt-BR' })).toMatchObject({
       uiLocale: 'pt-BR',
@@ -87,6 +100,13 @@ describe('resolveSettings', () => {
     ['invalid locale', 'en'],
   ])('initializes a new translation target from %s as %s', (locale, target) => {
     expect(targetLanguageForBrowser(locale)).toBe(target);
+  });
+
+  it('initializes targets only for new installations', () => {
+    expect(initialSettingsForInstall('install', 'pt-PT')).toEqual({
+      targetLanguage: 'pt-BR',
+    });
+    expect(initialSettingsForInstall('update', 'pt-PT')).toBeUndefined();
   });
 
   it('keeps an ordered fallback chain without the active provider', () => {

@@ -34,6 +34,15 @@ export const PAGE_CONTEXT_MENUS = [
   },
 ] as const;
 
+export function localizePageContextMenus(
+  translate: (key: MessageKey) => string,
+) {
+  return PAGE_CONTEXT_MENUS.map(({ titleKey, ...item }) => ({
+    ...item,
+    title: translate(titleKey),
+  }));
+}
+
 export function createPageActions(dependencies: PageActionDependencies) {
   async function start(tabId: number, translateImmediately: boolean) {
     return dependencies.start(tabId, {

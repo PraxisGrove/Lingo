@@ -3,6 +3,9 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { changeInterfaceLanguage } from '../../lib/i18n/i18n';
+import { SUPPORTED_UI_LOCALES } from '../../lib/i18n/locales';
+import { resources } from '../../lib/i18n/resources';
 import { DEFAULT_SETTINGS } from '../../lib/storage/settings-model';
 
 const mocks = vi.hoisted(() => ({
@@ -46,7 +49,9 @@ vi.mock('@/lib/storage/settings', async () => {
 import OptionsApp from './OptionsApp';
 
 describe('OptionsApp', () => {
-  afterEach(() => {
+  afterEach(async () => {
+    mocks.settings = { ...DEFAULT_SETTINGS, theme: 'dark' };
+    await changeInterfaceLanguage('en', 'en');
     document.body.innerHTML = '';
   });
 
@@ -123,6 +128,31 @@ describe('OptionsApp', () => {
 
     expect(document.querySelector('h1')?.textContent).toBe('设置');
     expect(document.body.textContent).toContain('隐私与设备数据');
+    await act(async () => root.unmount());
+  });
+
+  it.each(
+    SUPPORTED_UI_LOCALES,
+  )('renders the settings surface in %s', async (locale) => {
+    mocks.settings = {
+      ...DEFAULT_SETTINGS,
+      uiLocale: locale,
+      setupCompleted: true,
+    };
+    await changeInterfaceLanguage(locale, 'en');
+    document.body.innerHTML = '<div id="root"></div>';
+    const root = createRoot(document.getElementById('root') as HTMLElement);
+
+    await act(async () => {
+      root.render(<OptionsApp />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(document.querySelector('h1')?.textContent).toBe(
+      resources[locale].translation['options.title.settings'],
+    );
+    expect(document.documentElement.lang).toBe(locale);
     await act(async () => root.unmount());
   });
 });

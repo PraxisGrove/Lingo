@@ -157,6 +157,15 @@ export function targetLanguageForBrowser(browserLocale: string): string {
   return resolveUiLocale(browserLocale);
 }
 
+export function initialSettingsForInstall(
+  reason: string,
+  browserLocale: string,
+): Pick<ExtensionSettings, 'targetLanguage'> | undefined {
+  return reason === 'install'
+    ? { targetLanguage: targetLanguageForBrowser(browserLocale) }
+    : undefined;
+}
+
 function resolveSiteGlossaries(
   value: unknown,
 ): Record<string, GlossaryEntry[]> {

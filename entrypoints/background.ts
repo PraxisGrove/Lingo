@@ -1,5 +1,6 @@
 import {
   createPageActions,
+  localizePageContextMenus,
   PAGE_CONTEXT_MENUS,
 } from '@/lib/browser/page-actions';
 import {
@@ -22,8 +23,8 @@ import {
 } from '@/lib/providers/provider-service';
 import {
   getSettings,
+  initialSettingsForInstall,
   setSettings,
-  targetLanguageForBrowser,
   watchSettings,
 } from '@/lib/storage/settings';
 import { createTranslationOrchestrator } from '@/lib/translation/orchestrator';
@@ -91,13 +92,11 @@ export default defineBackground(() => {
 
   browser.runtime.onInstalled.addListener((details) => {
     void (async () => {
-      if (details.reason === 'install') {
-        await setSettings({
-          targetLanguage: targetLanguageForBrowser(
-            browser.i18n.getUILanguage(),
-          ),
-        });
-      }
+      const initialSettings = initialSettingsForInstall(
+        details.reason,
+        browser.i18n.getUILanguage(),
+      );
+      if (initialSettings) await setSettings(initialSettings);
       const settings = await getSettings();
       await refreshLocalizedMenus(settings);
     })().catch((error) => {
@@ -213,10 +212,10 @@ async function hasHostPermission(): Promise<boolean> {
 
 async function installContextMenus(): Promise<void> {
   await browser.contextMenus.removeAll();
-  for (const item of PAGE_CONTEXT_MENUS) {
+  for (const item of localizePageContextMenus(translate)) {
     browser.contextMenus.create({
       id: item.id,
-      title: translate(item.titleKey),
+      title: item.title,
       contexts: ['page'],
     });
   }

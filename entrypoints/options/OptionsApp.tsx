@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   changeInterfaceLanguage,
+  getBrowserInterfaceLocale,
   useInterfaceTranslation,
 } from '@/lib/i18n/i18n';
 import {
@@ -37,6 +38,7 @@ const FIELD_LABELS = {
 
 function OptionsApp() {
   const { locale, t } = useInterfaceTranslation();
+  const browserLocale = getBrowserInterfaceLocale();
   const [settings, setSettingsState] =
     useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [profile, setProfile] = useState<ProviderProfile>({
@@ -129,12 +131,8 @@ function OptionsApp() {
       const rules = await userRuleStore.import(userRules);
       setUserRules(JSON.stringify(rules, null, 2));
       setRuleStatus(t('options.status.rulesSaved'));
-    } catch (error) {
-      setRuleStatus(
-        error instanceof Error
-          ? error.message
-          : t('options.status.rulesSaveError'),
-      );
+    } catch {
+      setRuleStatus(t('options.status.rulesSaveError'));
     }
   }
 
@@ -259,7 +257,7 @@ function OptionsApp() {
           >
             <option value="auto">
               {t('language.auto', {
-                language: t(`language.${locale}` as MessageKey),
+                language: t(`language.${browserLocale}` as MessageKey),
               })}
             </option>
             {SUPPORTED_UI_LOCALES.map((supportedLocale) => (

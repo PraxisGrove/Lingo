@@ -1,7 +1,7 @@
 import i18next, { type TOptions } from 'i18next';
 import { initReactI18next, useTranslation } from 'react-i18next';
 import type { UiLocalePreference } from './locales';
-import { resolveUiLocale } from './locales';
+import { resolveUiLocale, type SupportedUiLocale } from './locales';
 import { type MessageKey, resources } from './resources';
 
 export const interfaceI18n = i18next.createInstance();
@@ -28,6 +28,10 @@ function getBrowserLocale(): string {
   return typeof browser !== 'undefined' && browser.i18n?.getUILanguage
     ? browser.i18n.getUILanguage()
     : 'en';
+}
+
+export function getBrowserInterfaceLocale(): SupportedUiLocale {
+  return resolveUiLocale(getBrowserLocale());
 }
 
 export function translate(key: MessageKey, options?: TOptions): string {

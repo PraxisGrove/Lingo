@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 
 import { describe, expect, it, vi } from 'vitest';
+import { SUPPORTED_UI_LOCALES } from '../i18n/locales';
+import { resources } from '../i18n/resources';
 import type { PageTranslation } from '../page-translation/page-translation';
 import { DEFAULT_SETTINGS } from '../storage/settings-model';
 import { createFloatingPageControl } from './floating-page-control';
@@ -85,6 +87,25 @@ describe('floating page control', () => {
       displayMode: 'bilingual',
       translateImmediately: false,
     });
+    control.dispose();
+  });
+
+  it.each(SUPPORTED_UI_LOCALES)('uses the %s accessible label', (locale) => {
+    const control = createFloatingPageControl({
+      document,
+      isTopFrame: true,
+      pageTranslation: pageTranslation(),
+      translate: (key) =>
+        (resources[locale].translation as Record<string, string>)[key],
+    });
+    control.update({ ...DEFAULT_SETTINGS, floatingButtonEnabled: true });
+
+    const button = document
+      .querySelector<HTMLElement>('[data-lingo-floating-control]')
+      ?.shadowRoot?.querySelector<HTMLButtonElement>('button');
+    expect(button?.getAttribute('aria-label')).toBe(
+      resources[locale].translation['floating.translate'],
+    );
     control.dispose();
   });
 });
