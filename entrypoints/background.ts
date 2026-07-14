@@ -32,6 +32,7 @@ import { resolveRequestQuality } from '@/lib/translation/request-quality';
 
 export default defineBackground(() => {
   const logger = createLogger('background');
+  const translationLogger = createLogger('translation');
   const translationCache = createTranslationCache();
   const orchestrator = createTranslationOrchestrator(getActiveProviderChain, {
     cache: createConditionalTranslationCache(
@@ -42,6 +43,7 @@ export default defineBackground(() => {
       const settings = await getSettings();
       return resolveRequestQuality(settings, request.siteHostname);
     },
+    logger: translationLogger,
   });
   const pageActions = createPageActions({
     async getActiveTabId() {
@@ -153,10 +155,18 @@ export default defineBackground(() => {
 
     if (message.type === 'testProviderConnection') {
       return (async () => {
-        return testProviderProfile(
+        const result = await testProviderProfile(
           message.payload.profile,
           message.payload.credential,
         );
+        if (!result.ok) {
+          logger.warn('Provider connection test failed.', {
+            provider: message.payload.profile.provider,
+            category: result.category,
+            message: result.message,
+          });
+        }
+        return result;
       })();
     }
 

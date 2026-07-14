@@ -1,4 +1,5 @@
 import { changeInterfaceLanguage, translate } from '@/lib/i18n/i18n';
+import { createLogger } from '@/lib/logger/logger';
 import { isExtensionMessage } from '@/lib/messaging/messages';
 import { createTranslationPortClient } from '@/lib/messaging/translation-port';
 import { startAutomaticTranslation } from '@/lib/page-translation/automatic-session';
@@ -11,10 +12,12 @@ export default defineContentScript({
   matches: ['<all_urls>'],
   allFrames: true,
   main() {
+    const logger = createLogger('content');
     const client = createTranslationPortClient();
     const pageTranslation = createPageTranslation({
       document,
       translate: client.translate,
+      logger,
     });
     const floatingControl = createFloatingPageControl({
       document,
@@ -40,25 +43,35 @@ export default defineContentScript({
       }
     });
 
-    void getSettings().then(async (settings) => {
-      await changeInterfaceLanguage(settings.uiLocale);
-      floatingControl.update(settings);
-    });
+    void getSettings()
+      .then(async (settings) => {
+        await changeInterfaceLanguage(settings.uiLocale);
+        floatingControl.update(settings);
+      })
+      .catch((error) => {
+        logger.error('Could not initialize content settings.', { error });
+      });
     const unwatchSettings = watchSettings((settings) => {
-      void changeInterfaceLanguage(settings.uiLocale).then(() =>
-        floatingControl.update(settings),
-      );
+      void changeInterfaceLanguage(settings.uiLocale)
+        .then(() => floatingControl.update(settings))
+        .catch((error) => {
+          logger.error('Could not apply updated content settings.', { error });
+        });
     });
-    void startAutomaticTranslation(pageTranslation, document).catch(
-      () => undefined,
-    );
+    void startAutomaticTranslation(pageTranslation, document).catch((error) => {
+      logger.error('Automatic page translation failed.', { error });
+    });
 
     window.addEventListener(
       'pagehide',
       () => {
-        unwatchSettings();
-        floatingControl.dispose();
-        client.disconnect();
+        try {
+          unwatchSettings();
+          floatingControl.dispose();
+          client.disconnect();
+        } catch (error) {
+          logger.warn('Content script cleanup was interrupted.', { error });
+        }
       },
       { once: true },
     );

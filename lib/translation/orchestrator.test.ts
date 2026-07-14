@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createTranslationCache } from '../cache/translation-cache';
+import type { Logger } from '../logger/logger';
 import {
   createTranslationOrchestrator,
   type ProviderBatchInput,
@@ -159,6 +160,58 @@ describe('TranslationOrchestrator', () => {
     expect(attempts).toBe(2);
     expect(waits).toEqual([250]);
     expect(events.at(-1)).toMatchObject({ type: 'completed' });
+  });
+
+  it('logs retryable and terminal provider failures without request content', async () => {
+    const logger = mockLogger();
+    const orchestrator = createTranslationOrchestrator(
+      provider(async () => {
+        throw Object.assign(new Error('Provider unavailable.'), {
+          category: 'unavailable',
+        });
+      }),
+      { logger, maxAttempts: 2, wait: async () => undefined },
+    );
+
+    await collect(orchestrator);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Translation provider attempt failed; retrying.',
+      expect.objectContaining({
+        attempt: 1,
+        category: 'unavailable',
+        unitCount: 1,
+      }),
+    );
+    expect(logger.error).toHaveBeenCalledWith(
+      'Translation provider batch failed.',
+      expect.objectContaining({
+        category: 'unavailable',
+        providerIndex: 0,
+        unitCount: 1,
+      }),
+    );
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('Hello');
+  });
+
+  it('logs incomplete provider responses with aggregate counts', async () => {
+    const logger = mockLogger();
+    const orchestrator = createTranslationOrchestrator(
+      provider(async () => []),
+      { logger },
+    );
+
+    await collect(orchestrator);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Translation provider returned incomplete results.',
+      expect.objectContaining({
+        providerIndex: 0,
+        requestedUnitCount: 1,
+        returnedResultCount: 0,
+        validResultCount: 0,
+      }),
+    );
   });
 
   it('uses only an explicitly supplied fallback provider after authentication failure', async () => {
@@ -399,4 +452,13 @@ async function collect(
   }))
     events.push(event);
   return events;
+}
+
+function mockLogger() {
+  return {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  } satisfies Logger;
 }

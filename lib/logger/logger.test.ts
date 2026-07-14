@@ -37,4 +37,27 @@ describe('createLogger', () => {
     expect(rendered).toContain('network');
     expect(rendered).not.toContain('[object Object]');
   });
+
+  it('redacts private translation context and URLs', () => {
+    const write = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logger = createLogger('translation', 'error');
+
+    logger.error('Provider request failed.', {
+      endpoint: 'https://private.example/v1',
+      credential: 'secret-key',
+      units: [{ id: 'one', text: 'private paragraph' }],
+      siteGlossaries: {
+        'private.example': [{ source: 'Codename', target: '机密代号' }],
+      },
+      error: new Error('Request to https://private.example/v1 failed.'),
+      category: 'network',
+    });
+
+    const rendered = write.mock.calls[0]?.map(String).join(' ');
+    expect(rendered).toContain('network');
+    expect(rendered).toContain('[Redacted]');
+    expect(rendered).not.toContain('private.example');
+    expect(rendered).not.toContain('secret-key');
+    expect(rendered).not.toContain('private paragraph');
+  });
 });

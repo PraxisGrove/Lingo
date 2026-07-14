@@ -4,6 +4,7 @@ import {
   useInterfaceTranslation,
 } from '@/lib/i18n/i18n';
 import type { MessageKey } from '@/lib/i18n/resources';
+import { createLogger } from '@/lib/logger/logger';
 import {
   createMessage,
   type ExtensionMessages,
@@ -21,6 +22,8 @@ import {
 } from '@/lib/storage/settings';
 import { resolvePopupNotice } from '@/lib/ui/popup-state';
 import './App.css';
+
+const logger = createLogger('popup');
 
 const IDLE_SNAPSHOT: SessionSnapshot = {
   status: 'idle',
@@ -48,24 +51,44 @@ function App() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void getSettings().then((loadedSettings) => {
-      setSettingsState(loadedSettings);
-      void changeInterfaceLanguage(loadedSettings.uiLocale);
-    });
-    void sendMessage('getExtensionStatus', {}).then(setExtensionStatus);
-    void loadActivePage().then(({ hostname: activeHostname, snapshot }) => {
-      setHostname(activeHostname);
-      setPage(snapshot);
-      setPageLoaded(true);
-      if (activeHostname !== '') {
-        void userRuleStore
-          .translationPolicyFor(activeHostname)
-          .then(setSitePolicy);
-      }
-    });
+    void getSettings()
+      .then(async (loadedSettings) => {
+        setSettingsState(loadedSettings);
+        await changeInterfaceLanguage(loadedSettings.uiLocale);
+      })
+      .catch((error) =>
+        logger.error('Could not load popup settings.', { error }),
+      );
+    void sendMessage('getExtensionStatus', {})
+      .then(setExtensionStatus)
+      .catch((error) =>
+        logger.error('Could not load extension status.', { error }),
+      );
+    void loadActivePage()
+      .then(({ hostname: activeHostname, snapshot }) => {
+        setHostname(activeHostname);
+        setPage(snapshot);
+        setPageLoaded(true);
+        if (activeHostname !== '') {
+          void userRuleStore
+            .translationPolicyFor(activeHostname)
+            .then(setSitePolicy)
+            .catch((error) =>
+              logger.error('Could not load site translation policy.', {
+                error,
+              }),
+            );
+        }
+      })
+      .catch((error) => {
+        logger.error('Could not inspect the active page.', { error });
+        setPageLoaded(true);
+      });
     return watchSettings((nextSettings) => {
       setSettingsState(nextSettings);
-      void changeInterfaceLanguage(nextSettings.uiLocale);
+      void changeInterfaceLanguage(nextSettings.uiLocale).catch((error) =>
+        logger.error('Could not apply popup interface language.', { error }),
+      );
     });
   }, []);
 
@@ -77,10 +100,20 @@ function App() {
 
   useEffect(() => {
     if (!pageLoaded) return;
+    let failureReported = false;
     const timer = window.setInterval(() => {
       void sendToActiveTab('getPageTranslation', {})
-        .then(setPage)
-        .catch(() => setPage(null));
+        .then((snapshot) => {
+          failureReported = false;
+          setPage(snapshot);
+        })
+        .catch((error) => {
+          if (!failureReported) {
+            logger.warn('Lost contact with the active page.', { error });
+            failureReported = true;
+          }
+          setPage(null);
+        });
     }, 800);
     return () => window.clearInterval(timer);
   }, [pageLoaded]);
@@ -105,7 +138,8 @@ function App() {
     setBusy(true);
     try {
       setPage(await sendToActiveTab(type, payload));
-    } catch {
+    } catch (error) {
+      logger.error('Popup page command failed.', { command: type, error });
       setPage(null);
     } finally {
       setBusy(false);
@@ -372,7 +406,8 @@ async function loadActivePage(): Promise<{
   let hostname = '';
   try {
     hostname = tab?.url ? new URL(tab.url).hostname : hostname;
-  } catch {
+  } catch (error) {
+    logger.debug('Active tab URL is not a web origin.', { error });
     // Browser-internal URLs do not always parse as web origins.
   }
   if (tab?.id === undefined) return { hostname, snapshot: null };
@@ -384,7 +419,10 @@ async function loadActivePage(): Promise<{
         createMessage('getPageTranslation', {}),
       ),
     };
-  } catch {
+  } catch (error) {
+    logger.warn('Could not read translation state from the active page.', {
+      error,
+    });
     return { hostname, snapshot: null };
   }
 }

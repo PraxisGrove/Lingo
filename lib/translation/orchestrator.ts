@@ -1,4 +1,5 @@
 import type { TranslationCache } from '../cache/translation-cache';
+import type { Logger } from '../logger/logger';
 import { resolveTranslationQuality, type TranslationQuality } from './quality';
 import type {
   TranslationEvent,
@@ -45,6 +46,7 @@ export type TranslationOrchestratorOptions = {
   maxAttempts?: number;
   wait?: (milliseconds: number) => Promise<void>;
   quality?: (request: TranslationRequest) => Promise<TranslationQuality>;
+  logger?: Logger;
 };
 
 export type TranslationProviderResolver = () => Promise<TranslationProvider[]>;
@@ -83,6 +85,7 @@ export function createTranslationOrchestrator(
         timeoutMs,
         wait,
         () => cancelledSessions.has(request.sessionId),
+        options.logger,
       );
 
       for (const outcome of outcomes) {
@@ -113,9 +116,20 @@ export function createTranslationOrchestrator(
         pageRevision: request.pageRevision,
         unitId: null,
       };
+      options.logger?.debug('Translation session completed.', {
+        sessionId: request.sessionId,
+        pageRevision: request.pageRevision,
+        requestedUnitCount: request.units.length,
+        translatedUnitCount: outcomes.filter(
+          (outcome) => outcome.type === 'translated',
+        ).length,
+        failedUnitCount: outcomes.filter((outcome) => outcome.type === 'failed')
+          .length,
+      });
     },
     async cancel(sessionId) {
       cancelledSessions.add(sessionId);
+      options.logger?.info('Translation session cancelled.', { sessionId });
     },
   };
 }
@@ -137,6 +151,7 @@ async function translateUnits(
   timeoutMs: number,
   wait: (milliseconds: number) => Promise<void>,
   cancelled: () => boolean,
+  logger?: Logger,
 ): Promise<Outcome[]> {
   const outcomes: Outcome[] = [];
   let pending = request.units;
@@ -175,8 +190,18 @@ async function translateUnits(
             timeoutMs,
             wait,
             cancelled,
+            logger,
+            providerIndex,
           );
           const resultsById = validatedResults(units, results);
+          if (resultsById.size !== units.length) {
+            logger?.warn('Translation provider returned incomplete results.', {
+              providerIndex,
+              requestedUnitCount: units.length,
+              returnedResultCount: results.length,
+              validResultCount: resultsById.size,
+            });
+          }
           const found: Outcome[] = [];
           for (const unit of units) {
             const text = resultsById.get(unit.id);
@@ -203,8 +228,23 @@ async function translateUnits(
           }
           return found;
         } catch (error) {
-          if (isFallbackError(error) && providerIndex < providers.length - 1)
+          const willUseFallback =
+            isFallbackError(error) && providerIndex < providers.length - 1;
+          if (willUseFallback) {
+            logger?.warn('Translation provider failed; switching fallback.', {
+              providerIndex,
+              category: category(error) ?? 'unknown',
+              unitCount: units.length,
+              error,
+            });
             return [];
+          }
+          logger?.error('Translation provider batch failed.', {
+            providerIndex,
+            category: category(error) ?? 'unknown',
+            unitCount: units.length,
+            error,
+          });
           return units.map((unit) => ({
             type: 'failed' as const,
             unitId: unit.id,
@@ -273,6 +313,8 @@ async function attemptBatch(
   timeoutMs: number,
   wait: (milliseconds: number) => Promise<void>,
   cancelled: () => boolean,
+  logger?: Logger,
+  providerIndex?: number,
 ): Promise<ProviderBatchResult> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -293,6 +335,14 @@ async function attemptBatch(
     } catch (error) {
       lastError = error;
       if (!isRetryableError(error) || attempt === maxAttempts) break;
+      logger?.warn('Translation provider attempt failed; retrying.', {
+        providerIndex,
+        attempt,
+        maxAttempts,
+        category: category(error) ?? 'unknown',
+        unitCount: units.length,
+        error,
+      });
       await wait(250 * 2 ** (attempt - 1));
     }
   }

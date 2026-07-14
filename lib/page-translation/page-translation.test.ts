@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Logger } from '../logger/logger';
 import {
   createPageTranslation as createPageTranslationImplementation,
   type PageTranslation,
@@ -135,8 +136,10 @@ describe('PageTranslation', () => {
   });
 
   it('keeps original content and exposes a categorized translation failure', async () => {
+    const logger = mockLogger();
     const pageTranslation = createPageTranslation({
       document,
+      logger,
       translate: async () => {
         throw Object.assign(
           new Error('The provider balance is insufficient.'),
@@ -163,13 +166,23 @@ describe('PageTranslation', () => {
     expect(document.querySelector('article')?.textContent).toContain(
       'Hello world.',
     );
+    expect(logger.error).toHaveBeenCalledWith(
+      'Page translation request failed.',
+      expect.objectContaining({
+        category: 'quota',
+        pageRevision: 0,
+        unitCount: 2,
+      }),
+    );
   });
 
   it('keeps partial results and retries only failed paragraphs', async () => {
     let attempt = 0;
     const translatedBatches: string[][] = [];
+    const logger = mockLogger();
     const pageTranslation = createPageTranslation({
       document,
+      logger,
       async translate(units) {
         translatedBatches.push(units.map((unit) => unit.id));
         attempt += 1;
@@ -213,6 +226,15 @@ describe('PageTranslation', () => {
       totalUnitCount: 2,
     });
     expect(translatedBatches[1]).toEqual([translatedBatches[0][1]]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Page translation completed with missing results.',
+      expect.objectContaining({
+        failedUnitCount: 1,
+        pageRevision: 0,
+        requestedUnitCount: 2,
+        translatedUnitCount: 1,
+      }),
+    );
   });
 
   it('restores the original page without removing page-owned changes', async () => {
@@ -475,3 +497,12 @@ describe('PageTranslation', () => {
     expect(document.querySelector('[data-lingo-translation]')).toBeNull();
   });
 });
+
+function mockLogger() {
+  return {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  } satisfies Logger;
+}

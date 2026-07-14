@@ -62,23 +62,37 @@ function OptionsApp() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   useEffect(() => {
-    void getSettings().then((loadedSettings) => {
-      setSettingsState(loadedSettings);
-      setGlossaryText(formatGlossary(loadedSettings));
-      void changeInterfaceLanguage(loadedSettings.uiLocale);
-    });
+    void getSettings()
+      .then(async (loadedSettings) => {
+        setSettingsState(loadedSettings);
+        setGlossaryText(formatGlossary(loadedSettings));
+        await changeInterfaceLanguage(loadedSettings.uiLocale);
+      })
+      .catch((error) => logger.error('Could not load settings.', { error }));
     void userRuleStore
       .export()
       .then(setUserRules)
-      .catch(() => setRuleStatus(t('options.status.rulesLoadError')));
+      .catch((error) => {
+        logger.error('Could not load user rules.', { error });
+        setRuleStatus(t('options.status.rulesLoadError'));
+      });
     void communityRuleStore
       .get()
-      .then((state) => setCommunityUpdatesEnabled(state.updatesEnabled));
-    void sendMessage('getExtensionStatus', {}).then(setExtensionStatus);
+      .then((state) => setCommunityUpdatesEnabled(state.updatesEnabled))
+      .catch((error) =>
+        logger.error('Could not load community rule settings.', { error }),
+      );
+    void sendMessage('getExtensionStatus', {})
+      .then(setExtensionStatus)
+      .catch((error) =>
+        logger.error('Could not load extension status.', { error }),
+      );
     return watchSettings((nextSettings) => {
       setSettingsState(nextSettings);
       setGlossaryText(formatGlossary(nextSettings));
-      void changeInterfaceLanguage(nextSettings.uiLocale);
+      void changeInterfaceLanguage(nextSettings.uiLocale).catch((error) =>
+        logger.error('Could not apply options interface language.', { error }),
+      );
     });
   }, [t]);
 
@@ -119,7 +133,11 @@ function OptionsApp() {
       await updateSettings({ setupCompleted: true });
       setCredential('');
       setStatus(t('options.status.connectionReady'));
-    } catch {
+    } catch (error) {
+      logger.error('Could not test or save provider profile.', {
+        provider: profile.provider,
+        error,
+      });
       setStatus(t('options.status.connectionError'));
     } finally {
       setBusy(false);
@@ -131,7 +149,8 @@ function OptionsApp() {
       const rules = await userRuleStore.import(userRules);
       setUserRules(JSON.stringify(rules, null, 2));
       setRuleStatus(t('options.status.rulesSaved'));
-    } catch {
+    } catch (error) {
+      logger.error('Could not import user rules.', { error });
       setRuleStatus(t('options.status.rulesSaveError'));
     }
   }
@@ -148,7 +167,8 @@ function OptionsApp() {
       link.click();
       URL.revokeObjectURL(url);
       setRuleStatus(t('options.status.rulesExported'));
-    } catch {
+    } catch (error) {
+      logger.warn('Could not export user rules.', { error });
       setRuleStatus(t('options.status.rulesInvalidJson'));
     }
   }

@@ -1,4 +1,5 @@
 import type { TranslationUnit } from '@/lib/translation/types';
+import type { Logger } from '../logger/logger';
 
 export type DisplayMode = 'bilingual' | 'translation' | 'original';
 export type ContentScope = 'main' | 'main-and-interface';
@@ -60,6 +61,7 @@ type TranslationClient = (
 type PageTranslationDependencies = {
   document: Document;
   translate: TranslationClient;
+  logger?: Logger;
 };
 
 type Candidate = {
@@ -119,6 +121,7 @@ const INLINE_TAGS = new Set([
 export function createPageTranslation({
   document,
   translate,
+  logger,
 }: PageTranslationDependencies): PageTranslation {
   const listeners = new Set<(event: PageTranslationEvent) => void>();
   const unitIds = new WeakMap<HTMLElement, string>();
@@ -185,6 +188,12 @@ export function createPageTranslation({
       intersectionObserver?.unobserve(candidate.element);
     }
     let result: TranslationClientResult;
+    logger?.debug('Page translation request started.', {
+      pageRevision: revision,
+      sessionToken: token,
+      unitCount: candidates.length,
+      targetLanguage: options.targetLanguage,
+    });
     try {
       result = await translate(
         candidates.map(({ id, number, encodedText }) => ({
@@ -195,6 +204,20 @@ export function createPageTranslation({
         options.targetLanguage,
       );
     } catch (error) {
+      if (
+        token !== sessionToken ||
+        revision !== current.pageRevision ||
+        !activeOptions
+      ) {
+        return;
+      }
+      logger?.error('Page translation request failed.', {
+        pageRevision: revision,
+        sessionToken: token,
+        unitCount: candidates.length,
+        category: errorCategory(error),
+        error,
+      });
       for (const candidate of candidates) failedElements.add(candidate.element);
       publish({
         ...current,
@@ -236,6 +259,25 @@ export function createPageTranslation({
       inserted += 1;
     }
     applyDisplayMode(current.displayMode);
+    if (failedElements.size > 0) {
+      logger?.warn('Page translation completed with missing results.', {
+        pageRevision: revision,
+        sessionToken: token,
+        requestedUnitCount: candidates.length,
+        translatedUnitCount: inserted,
+        failedUnitCount: failedElements.size,
+        failureCategories: [
+          ...new Set(failures.map((failure) => failure.category)),
+        ],
+      });
+    } else {
+      logger?.debug('Page translation request completed.', {
+        pageRevision: revision,
+        sessionToken: token,
+        requestedUnitCount: candidates.length,
+        translatedUnitCount: inserted,
+      });
+    }
     publish({
       ...current,
       status: failures.some((failure) => isBlockingCategory(failure.category))
