@@ -74,6 +74,7 @@ type Candidate = {
 
 const TRANSLATION_ATTRIBUTE = 'data-lingo-translation';
 const HIDDEN_ATTRIBUTE = 'data-lingo-hidden';
+const TABLE_CELL_HIDDEN_ATTRIBUTE = 'data-lingo-cell-original-hidden';
 const PROTECTED_SELECTOR = [
   '[data-lingo-content="exclude"]',
   '[translate="no"]',
@@ -96,6 +97,8 @@ const PROTECTED_SELECTOR = [
 ].join(',');
 const INTERFACE_SELECTOR =
   '[data-lingo-content="interface"], nav, header, footer, [role="navigation"]';
+const CONTENT_CANDIDATE_SELECTOR =
+  'h1, h2, h3, h4, h5, h6, p, li, blockquote, figcaption, td, th';
 const INLINE_TAGS = new Set([
   'A',
   'ABBR',
@@ -156,10 +159,23 @@ export function createPageTranslation({
 
   function applyDisplayMode(mode: DisplayMode) {
     for (const [original, translation] of insertedTranslations) {
-      if (mode === 'translation') original.setAttribute(HIDDEN_ATTRIBUTE, '');
-      else original.removeAttribute(HIDDEN_ATTRIBUTE);
+      const hiddenAttribute = isTableCell(original)
+        ? TABLE_CELL_HIDDEN_ATTRIBUTE
+        : HIDDEN_ATTRIBUTE;
+      if (mode === 'translation') original.setAttribute(hiddenAttribute, '');
+      else original.removeAttribute(hiddenAttribute);
       translation.hidden = mode === 'original';
     }
+  }
+
+  function removeTranslations() {
+    for (const translation of insertedTranslations.values())
+      translation.remove();
+    for (const original of insertedTranslations.keys()) {
+      original.removeAttribute(HIDDEN_ATTRIBUTE);
+      original.removeAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE);
+    }
+    insertedTranslations.clear();
   }
 
   async function translateElements(elements: HTMLElement[]) {
@@ -249,11 +265,23 @@ export function createPageTranslation({
         continue;
       }
       if (!candidate.element.isConnected) continue;
-      const translation = document.createElement(candidate.element.tagName);
+      const tableCell = isTableCell(candidate.element);
+      const translation = tableCell
+        ? document.createElement('div')
+        : cloneTranslationShell(candidate.element);
+      if (tableCell) {
+        translation.style.fontSize =
+          document.defaultView?.getComputedStyle(candidate.element).fontSize ||
+          '1rem';
+      }
       translation.setAttribute(TRANSLATION_ATTRIBUTE, candidate.id);
       translation.lang = options.targetLanguage;
       renderTranslatedContent(translation, text, candidate.inlineElements);
-      candidate.element.after(translation);
+      if (tableCell) {
+        candidate.element.append(translation);
+      } else {
+        candidate.element.after(translation);
+      }
       insertedTranslations.set(candidate.element, translation);
       failedElements.delete(candidate.element);
       inserted += 1;
@@ -350,11 +378,7 @@ export function createPageTranslation({
   function handleNavigation() {
     if (!activeOptions) return;
     sessionToken += 1;
-    for (const translation of insertedTranslations.values())
-      translation.remove();
-    for (const original of insertedTranslations.keys())
-      original.removeAttribute(HIDDEN_ATTRIBUTE);
-    insertedTranslations.clear();
+    removeTranslations();
     pending.clear();
     failedElements.clear();
     pausedVisibleElements.clear();
@@ -494,11 +518,7 @@ export function createPageTranslation({
       document.defaultView?.removeEventListener('popstate', handleNavigation);
       restoreHistory?.();
       restoreHistory = undefined;
-      for (const translation of insertedTranslations.values())
-        translation.remove();
-      for (const original of insertedTranslations.keys())
-        original.removeAttribute(HIDDEN_ATTRIBUTE);
-      insertedTranslations.clear();
+      removeTranslations();
       pending.clear();
       failedElements.clear();
       pausedVisibleElements.clear();
@@ -549,21 +569,41 @@ function findCandidates(
   scope: ContentScope,
 ): HTMLElement[] {
   return [
-    ...document.querySelectorAll<HTMLElement>('p, li, blockquote'),
+    ...document.querySelectorAll<HTMLElement>(CONTENT_CANDIDATE_SELECTOR),
   ].filter(
     (element) =>
       !element.closest(`[${TRANSLATION_ATTRIBUTE}]`) &&
       !element.closest(PROTECTED_SELECTOR) &&
       (scope === 'main-and-interface' ||
         !element.closest(INTERFACE_SELECTOR)) &&
+      (!isTableCell(element) ||
+        !element.querySelector(CONTENT_CANDIDATE_SELECTOR)) &&
       isVisible(element) &&
       isContentCandidate(element, scope),
   );
 }
 
+function isTableCell(element: HTMLElement): boolean {
+  return element.tagName === 'TD' || element.tagName === 'TH';
+}
+
 function isVisible(element: HTMLElement): boolean {
-  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
-  return style?.display !== 'none' && style?.visibility !== 'hidden';
+  const view = element.ownerDocument.defaultView;
+  if (!view) return true;
+  let current: HTMLElement | null = element;
+  while (current) {
+    const style = view.getComputedStyle(current);
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.visibility === 'collapse' ||
+      style.getPropertyValue('content-visibility') === 'hidden'
+    ) {
+      return false;
+    }
+    current = current.parentElement;
+  }
+  return true;
 }
 
 function isContentCandidate(
@@ -642,4 +682,20 @@ function renderTranslatedContent(
   stack
     .at(-1)
     ?.element.append(target.ownerDocument.createTextNode(text.slice(cursor)));
+}
+
+function cloneTranslationShell(source: HTMLElement): HTMLElement {
+  const clone = source.cloneNode(false) as HTMLElement;
+  for (const attribute of [...clone.attributes]) {
+    if (
+      attribute.name === 'id' ||
+      attribute.name === 'hidden' ||
+      attribute.name === HIDDEN_ATTRIBUTE ||
+      attribute.name === TRANSLATION_ATTRIBUTE ||
+      attribute.name.startsWith('on')
+    ) {
+      clone.removeAttribute(attribute.name);
+    }
+  }
+  return clone;
 }

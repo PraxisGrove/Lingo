@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '../logger/logger';
 import {
@@ -8,6 +9,14 @@ import {
 } from './page-translation';
 
 const sessions: PageTranslation[] = [];
+const pageTranslationCss = readFileSync(
+  'entrypoints/page-translation.css',
+  'utf8',
+);
+const contentTypesFixture = readFileSync(
+  'lib/page-translation/fixtures/content-types.html',
+  'utf8',
+);
 const createPageTranslation: typeof createPageTranslationImplementation = (
   dependencies,
 ) => {
@@ -18,6 +27,7 @@ const createPageTranslation: typeof createPageTranslationImplementation = (
 
 describe('PageTranslation', () => {
   beforeEach(() => {
+    document.head.innerHTML = '';
     document.body.innerHTML = `
       <article>
         <p>Hello world.</p>
@@ -55,6 +65,115 @@ describe('PageTranslation', () => {
       'Chinese: Hello world.',
       'Chinese: This is a static article paragraph.',
     ]);
+  });
+
+  it('translates article headings and restores the original document', async () => {
+    document.body.innerHTML = contentTypesFixture;
+    const originalMarkup = document.body.innerHTML;
+    const pageTranslation = createPageTranslation({
+      document,
+      translate: async (units) =>
+        units.map((unit) => ({ ...unit, text: `Translated: ${unit.text}` })),
+    });
+
+    await pageTranslation.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+      translateImmediately: true,
+    });
+
+    expect(
+      document.querySelector('h1 + [data-lingo-translation]')?.textContent,
+    ).toBe('Translated: Understanding bilingual reading');
+    await pageTranslation.stop();
+    expect(document.body.innerHTML).toBe(originalMarkup);
+  });
+
+  it('translates figure captions without moving them out of the figure', async () => {
+    document.body.innerHTML = contentTypesFixture;
+    const pageTranslation = createPageTranslation({
+      document,
+      translate: async (units) =>
+        units.map((unit) => ({ ...unit, text: `Translated: ${unit.text}` })),
+    });
+
+    await pageTranslation.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+      translateImmediately: true,
+    });
+
+    const translation = document.querySelector(
+      'figure > figcaption + figcaption[data-lingo-translation]',
+    );
+    expect(translation?.textContent).toBe(
+      'Translated: A concise figure caption.',
+    );
+  });
+
+  it('translates table cells without adding rows or columns', async () => {
+    document.head.innerHTML = `<style>${pageTranslationCss}</style>`;
+    document.body.innerHTML = contentTypesFixture;
+    const originalMarkup = document.body.innerHTML;
+    const firstCell = document.querySelector<HTMLTableCellElement>('td');
+    const originalTextNode = firstCell?.firstChild;
+    const pageTranslation = createPageTranslation({
+      document,
+      translate: async (units) =>
+        units.map((unit) => ({ ...unit, text: `Translated: ${unit.text}` })),
+    });
+
+    await pageTranslation.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+      translateImmediately: true,
+    });
+
+    const rows = [...document.querySelectorAll('tr')];
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.cells.length)).toEqual([2, 2]);
+    expect(
+      document.querySelector('th > [data-lingo-translation]')?.textContent,
+    ).toBe('Translated: Language');
+    expect(
+      document.querySelector('td > [data-lingo-translation]')?.textContent,
+    ).toBe('Translated: English');
+    expect(originalTextNode?.parentElement).toBe(firstCell);
+
+    await pageTranslation.update({ displayMode: 'translation' });
+    expect(firstCell?.hasAttribute('data-lingo-cell-original-hidden')).toBe(
+      true,
+    );
+
+    await pageTranslation.stop();
+    expect(originalTextNode?.parentElement).toBe(firstCell);
+    expect(document.body.innerHTML).toBe(originalMarkup);
+  });
+
+  it('translates nested table paragraphs only once', async () => {
+    document.body.innerHTML = `
+      <main><table><tbody><tr><td><p>Nested cell paragraph.</p></td></tr></tbody></table></main>
+    `;
+    const translatedTexts: string[] = [];
+    const pageTranslation = createPageTranslation({
+      document,
+      async translate(units) {
+        translatedTexts.push(...units.map((unit) => unit.text));
+        return units;
+      },
+    });
+
+    await pageTranslation.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+      translateImmediately: true,
+    });
+
+    expect(translatedTexts).toEqual(['Nested cell paragraph.']);
+    expect(
+      document.querySelectorAll('td [data-lingo-translation]'),
+    ).toHaveLength(1);
+    expect(document.querySelector('tr')?.children).toHaveLength(1);
   });
 
   it('counts all queued paragraphs before they enter the viewport', async () => {
@@ -327,6 +446,7 @@ describe('PageTranslation', () => {
         <section translate="no"><p>Keep private.</p></section>
         <form><p>Payment details.</p></form>
         <p hidden>Not visible.</p>
+        <section style="display: none"><p>Hidden by ancestor CSS.</p></section>
         <pre><p>const credential = 'secret';</p></pre>
       </main>
     `;
@@ -406,6 +526,87 @@ describe('PageTranslation', () => {
       '/guide',
     );
     expect(translation?.querySelector('strong')?.textContent).toBe('guide');
+  });
+
+  it('preserves page styles that keep translated text on one line', async () => {
+    document.head.innerHTML = `
+      <style>
+        .single-line-label {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <article>
+        <p id="source-label" class="single-line-label" dir="ltr" onclick="alert('source')">
+          A single-line label.
+        </p>
+      </article>
+    `;
+    const pageTranslation = createPageTranslation({
+      document,
+      translate: async (units) =>
+        units.map((unit) => ({
+          ...unit,
+          text: 'Translated single-line label.',
+        })),
+    });
+
+    await pageTranslation.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+      translateImmediately: true,
+    });
+
+    const original = document.querySelector<HTMLElement>('article p');
+    const translation = document.querySelector<HTMLElement>(
+      '[data-lingo-translation]',
+    );
+    expect(original).not.toBeNull();
+    expect(translation).not.toBeNull();
+    if (!original || !translation)
+      throw new Error('Translation was not rendered.');
+    expect(getComputedStyle(original).whiteSpace).toBe('nowrap');
+    expect(getComputedStyle(translation).whiteSpace).toBe('nowrap');
+    expect(translation.classList.contains('single-line-label')).toBe(true);
+    expect(translation.dir).toBe('ltr');
+    expect(translation.hasAttribute('id')).toBe(false);
+    expect(translation.hasAttribute('onclick')).toBe(false);
+  });
+
+  it('does not let bilingual translations consume ordered-list numbers', async () => {
+    document.head.innerHTML = `<style>${pageTranslationCss}</style>`;
+    document.body.innerHTML = `
+      <main><ol><li>First item.</li><li>Second item.</li></ol></main>
+    `;
+    const pageTranslation = createPageTranslation({
+      document,
+      translate: async (units) =>
+        units.map((unit) => ({ ...unit, text: `Translated ${unit.text}` })),
+    });
+
+    await pageTranslation.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+      translateImmediately: true,
+    });
+
+    const translations = [
+      ...document.querySelectorAll<HTMLElement>('li[data-lingo-translation]'),
+    ];
+    expect(translations).toHaveLength(2);
+    expect(translations.map((item) => getComputedStyle(item).display)).toEqual([
+      'block',
+      'block',
+    ]);
+
+    await pageTranslation.update({ displayMode: 'translation' });
+    expect(translations.map((item) => getComputedStyle(item).display)).toEqual([
+      'list-item',
+      'list-item',
+    ]);
   });
 
   it('switches among bilingual, translation-only, and original modes', async () => {

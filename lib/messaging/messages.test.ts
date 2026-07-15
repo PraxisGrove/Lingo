@@ -32,7 +32,12 @@ describe('messages', () => {
       isExtensionMessage({
         type: 'saveProviderProfile',
         payload: {
-          profile: { id: 'work', name: 'Work', provider: 'deepl' },
+          profile: {
+            id: 'work',
+            name: 'Work',
+            provider: 'deepl',
+            nativeGlossaryId: 'glossary-123',
+          },
           credential: 'secret',
         },
       }),

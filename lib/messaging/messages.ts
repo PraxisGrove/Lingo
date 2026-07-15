@@ -162,9 +162,12 @@ export function isExtensionMessage(
 function isProviderProfile(value: unknown): value is ProviderProfile {
   if (value == null || typeof value !== 'object') return false;
   const profile = value as Record<string, unknown>;
-  const optionalKeys = ['endpoint', 'model', 'region'].filter(
-    (key) => key in profile,
-  );
+  const optionalKeys = [
+    'endpoint',
+    'model',
+    'region',
+    'nativeGlossaryId',
+  ].filter((key) => key in profile);
   return (
     isRecordWithKeys(profile, ['id', 'name', 'provider', ...optionalKeys]) &&
     typeof profile.id === 'string' &&

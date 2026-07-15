@@ -10,19 +10,22 @@ pre-commit:
     03-test:
       run: pnpm test
       interactive: true
-    04-typecheck:
+    04-browser-test:
+      run: pnpm test:browser
+      interactive: true
+    05-typecheck:
       run: pnpm compile
       interactive: true
-    05-check:
+    06-check:
       run: pnpm check
       interactive: true
-    06-build-chrome:
+    07-build-chrome:
       run: pnpm build
       interactive: true
-    07-build-firefox:
+    08-build-firefox:
       run: pnpm build:firefox
       interactive: true
-    08-whitespace:
+    09-whitespace:
       run: git diff --check
 
 commit-msg:

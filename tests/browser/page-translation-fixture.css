@@ -1,0 +1,40 @@
+body {
+  box-sizing: border-box;
+  color: #1f2937;
+  font-family: Arial, sans-serif;
+  margin: 0 auto;
+  max-width: 760px;
+  padding: 32px 24px 80px;
+}
+
+.fixture-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block-end: 24px;
+}
+
+button {
+  min-height: 36px;
+}
+
+.single-line-label {
+  background: #f3f4f6;
+  max-width: 340px;
+  overflow: hidden;
+  padding: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th,
+td {
+  border: 1px solid #9ca3af;
+  padding: 8px;
+  text-align: start;
+}

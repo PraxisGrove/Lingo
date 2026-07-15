@@ -8,3 +8,23 @@
 [data-lingo-hidden] {
   display: none;
 }
+
+td[data-lingo-cell-original-hidden],
+th[data-lingo-cell-original-hidden] {
+  font-size: 0;
+}
+
+td[data-lingo-cell-original-hidden] > :not([data-lingo-translation]),
+th[data-lingo-cell-original-hidden] > :not([data-lingo-translation]) {
+  display: none;
+}
+
+li[data-lingo-translation] {
+  display: block;
+  list-style: none;
+}
+
+li[data-lingo-hidden] + li[data-lingo-translation] {
+  display: list-item;
+  list-style: inherit;
+}

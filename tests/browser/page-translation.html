@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lingo page translation fixture</title>
+    <link rel="stylesheet" href="/entrypoints/page-translation.css" />
+    <link rel="stylesheet" href="/tests/browser/page-translation-fixture.css" />
+  </head>
+  <body>
+    <nav class="fixture-controls" aria-label="Translation display mode">
+      <button type="button" data-mode="bilingual">Bilingual</button>
+      <button type="button" data-mode="translation">Translation only</button>
+      <button type="button" data-mode="original">Original only</button>
+    </nav>
+    <div id="fixture"></div>
+    <script type="module">
+      import { createPageTranslation } from '/lib/page-translation/page-translation.ts';
+
+      const fixture = document.querySelector('#fixture');
+      fixture.innerHTML = await fetch(
+        '/lib/page-translation/fixtures/content-types.html',
+      ).then((response) => response.text());
+
+      const pageTranslation = createPageTranslation({
+        document,
+        translate: async (units) =>
+          units.map((unit) => ({
+            ...unit,
+            text: `Translated: ${unit.text}`,
+          })),
+      });
+      await pageTranslation.start({
+        targetLanguage: 'zh-CN',
+        displayMode: 'bilingual',
+        translateImmediately: true,
+      });
+
+      for (const button of document.querySelectorAll('[data-mode]')) {
+        button.addEventListener('click', () => {
+          void pageTranslation.update({ displayMode: button.dataset.mode });
+        });
+      }
+      window.pageTranslation = pageTranslation;
+      document.documentElement.dataset.fixtureReady = 'true';
+    </script>
+  </body>
+</html>

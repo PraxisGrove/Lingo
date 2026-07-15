@@ -36,6 +36,12 @@ jobs:
       - name: Test
         run: pnpm -s test
 
+      - name: Install browser test runtimes
+        run: pnpm exec playwright install --with-deps chromium firefox
+
+      - name: Test in browsers
+        run: pnpm -s test:browser
+
       - name: Check
         run: pnpm -s check
 

@@ -13,6 +13,7 @@ node_modules
 stats.html
 stats-*.json
 .wxt
+.vitest-attachments/
 web-ext.config.ts
 
 # Editor directories and files

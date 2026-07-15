@@ -16,10 +16,13 @@ The project must establish a signed CLA process before accepting external code.
 Use pnpm for package operations. Before opening a pull request, run:
 
 ```bash
+pnpm browser:install # once per Playwright version
 pnpm compile
 pnpm test
+pnpm test:browser
 pnpm check
 pnpm build
+pnpm build:firefox
 ```
 
 Add tests next to the code they cover. Test behavior through public module
