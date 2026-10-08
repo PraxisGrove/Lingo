@@ -1,5 +1,6 @@
 import type { TranslationUnit } from '@/lib/translation/types';
 import type { Logger } from '../logger/logger';
+import type { RuleSelectors } from '../rules/rule-resolver';
 
 export type DisplayMode = 'bilingual' | 'translation' | 'original';
 export type ContentScope = 'main' | 'main-and-interface';
@@ -56,12 +57,15 @@ export type PageTranslation = {
 type TranslationClient = (
   units: TranslationUnit[],
   targetLanguage: string,
+  onProgress?: (translations: TranslationUnit[]) => void,
 ) => Promise<TranslationClientResult>;
 
 type PageTranslationDependencies = {
   document: Document;
   translate: TranslationClient;
   cancel?: () => void;
+  getRuleSelectors?: () => Promise<RuleSelectors>;
+  watchNavigation?: (listener: () => void) => () => void;
   logger?: Logger;
 };
 
@@ -70,7 +74,9 @@ type Candidate = {
   id: string;
   number: number;
   encodedText: string;
+  signature: string;
   inlineElements: Map<string, HTMLElement>;
+  preservedElements: Map<string, HTMLElement>;
 };
 
 const TRANSLATION_ATTRIBUTE = 'data-lingo-translation';
@@ -126,6 +132,8 @@ export function createPageTranslation({
   document,
   translate,
   cancel,
+  getRuleSelectors,
+  watchNavigation,
   logger,
 }: PageTranslationDependencies): PageTranslation {
   const listeners = new Set<(event: PageTranslationEvent) => void>();
@@ -137,13 +145,17 @@ export function createPageTranslation({
   const failedElements = new Set<HTMLElement>();
   const pausedVisibleElements = new Set<HTMLElement>();
   const pending = new Set<HTMLElement>();
+  const activeRequests = new Set<symbol>();
   let nextUnitId = 1;
   let observer: MutationObserver | undefined;
   let intersectionObserver: IntersectionObserver | undefined;
   let mutationScheduled = false;
+  const mutationRoots = new Set<Element>();
   let activeOptions: StartSessionOptions | undefined;
+  let selectors: RuleSelectors = {};
   let restoreHistory: (() => void) | undefined;
   let sessionToken = 0;
+  let pageUrl = document.location.href;
   let current: SessionSnapshot = {
     status: 'idle',
     displayMode: 'bilingual',
@@ -161,13 +173,21 @@ export function createPageTranslation({
 
   function applyDisplayMode(mode: DisplayMode) {
     for (const [original, translation] of insertedTranslations) {
-      const hiddenAttribute = isTableCell(original)
-        ? TABLE_CELL_HIDDEN_ATTRIBUTE
-        : HIDDEN_ATTRIBUTE;
-      if (mode === 'translation') original.setAttribute(hiddenAttribute, '');
-      else original.removeAttribute(hiddenAttribute);
-      translation.hidden = mode === 'original';
+      applyUnitDisplayMode(original, translation, mode);
     }
+  }
+
+  function applyUnitDisplayMode(
+    original: HTMLElement,
+    translation: HTMLElement,
+    mode: DisplayMode,
+  ) {
+    const hiddenAttribute = isTableCell(original)
+      ? TABLE_CELL_HIDDEN_ATTRIBUTE
+      : HIDDEN_ATTRIBUTE;
+    if (mode === 'translation') original.setAttribute(hiddenAttribute, '');
+    else original.removeAttribute(hiddenAttribute);
+    translation.hidden = mode === 'original';
   }
 
   function removeTranslations() {
@@ -187,14 +207,19 @@ export function createPageTranslation({
     original.removeAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE);
   }
 
-  function refreshChangedContent() {
+  function refreshChangedContent(roots: Element[]) {
     for (const element of knownCandidates) {
       const candidate = processed.get(element);
       const detached = !element.isConnected;
       if (
         !detached &&
+        !roots.some((root) => root.contains(element) || element.contains(root))
+      )
+        continue;
+      if (
+        !detached &&
         (!candidate ||
-          encodeInlineContent(element).text === candidate.encodedText)
+          encodeInlineContent(element).signature === candidate.signature)
       ) {
         continue;
       }
@@ -220,7 +245,7 @@ export function createPageTranslation({
     return (
       processed.get(candidate.element) === candidate &&
       candidate.element.isConnected &&
-      encodeInlineContent(candidate.element).text === candidate.encodedText
+      encodeInlineContent(candidate.element).signature === candidate.signature
     );
   }
 
@@ -242,7 +267,11 @@ export function createPageTranslation({
     registerCandidates(fresh);
     const candidates = fresh.map(createCandidate);
     if (candidates.length === 0) {
-      if (current.status === 'translating') {
+      if (
+        current.status === 'translating' &&
+        activeRequests.size === 0 &&
+        pending.size === 0
+      ) {
         publish({ ...current, status: 'translated' });
       }
       return;
@@ -252,6 +281,72 @@ export function createPageTranslation({
       pending.delete(candidate.element);
       intersectionObserver?.unobserve(candidate.element);
     }
+    let inserted = 0;
+    const candidatesById = new Map(
+      candidates.map((candidate) => [candidate.id, candidate]),
+    );
+    const renderResults = (translations: TranslationUnit[]) => {
+      if (
+        token !== sessionToken ||
+        revision !== current.pageRevision ||
+        !activeOptions
+      )
+        return;
+      for (const unit of translations) {
+        const candidate = candidatesById.get(unit.id);
+        if (!candidate) continue;
+        if (
+          insertedTranslations.has(candidate.element) ||
+          !isCurrentCandidate(candidate)
+        )
+          continue;
+        const text = unit.text;
+        if (
+          !candidate.element.isConnected ||
+          !canTranslateContent(candidate.element)
+        ) {
+          continue;
+        }
+        const tableCell = isTableCell(candidate.element);
+        const translation = tableCell
+          ? document.createElement('div')
+          : cloneTranslationShell(candidate.element);
+        if (tableCell) {
+          translation.style.fontSize =
+            document.defaultView?.getComputedStyle(candidate.element)
+              .fontSize || '1rem';
+        }
+        translation.setAttribute(TRANSLATION_ATTRIBUTE, candidate.id);
+        translation.lang = options.targetLanguage;
+        renderTranslatedContent(
+          translation,
+          text,
+          candidate.inlineElements,
+          candidate.preservedElements,
+        );
+        if (tableCell) {
+          candidate.element.append(translation);
+        } else {
+          candidate.element.after(translation);
+        }
+        insertedTranslations.set(candidate.element, translation);
+        applyUnitDisplayMode(
+          candidate.element,
+          translation,
+          current.displayMode,
+        );
+        failedElements.delete(candidate.element);
+        inserted += 1;
+      }
+      publish({
+        ...current,
+        translatedUnitCount: insertedTranslations.size,
+        failedUnitCount: failedElements.size,
+      });
+    };
+    const requestId = Symbol();
+    activeRequests.add(requestId);
+    publish({ ...current, status: 'translating' });
     let result: TranslationClientResult;
     logger?.debug('Page translation request started.', {
       pageRevision: revision,
@@ -267,8 +362,10 @@ export function createPageTranslation({
           text: encodedText,
         })),
         options.targetLanguage,
-      );
+        renderResults,
+      ).finally(() => activeRequests.delete(requestId));
     } catch (error) {
+      activeRequests.delete(requestId);
       if (
         token !== sessionToken ||
         revision !== current.pageRevision ||
@@ -283,7 +380,11 @@ export function createPageTranslation({
         category: errorCategory(error),
         error,
       });
-      const currentCandidates = candidates.filter(isCurrentCandidate);
+      const currentCandidates = candidates.filter(
+        (candidate) =>
+          isCurrentCandidate(candidate) &&
+          !insertedTranslations.has(candidate.element),
+      );
       if (currentCandidates.length === 0) return;
       for (const candidate of currentCandidates)
         failedElements.add(candidate.element);
@@ -308,44 +409,16 @@ export function createPageTranslation({
     ) {
       return;
     }
-    const byId = new Map(translations.map((unit) => [unit.id, unit.text]));
     if (!candidates.some(isCurrentCandidate)) return;
-    let inserted = 0;
+    renderResults(translations);
     for (const candidate of candidates) {
-      if (!isCurrentCandidate(candidate)) continue;
-      const text = byId.get(candidate.id);
-      if (text === undefined) {
-        failedElements.add(candidate.element);
-        continue;
-      }
       if (
-        !candidate.element.isConnected ||
-        !canTranslateContent(candidate.element)
+        isCurrentCandidate(candidate) &&
+        !insertedTranslations.has(candidate.element)
       ) {
-        continue;
+        failedElements.add(candidate.element);
       }
-      const tableCell = isTableCell(candidate.element);
-      const translation = tableCell
-        ? document.createElement('div')
-        : cloneTranslationShell(candidate.element);
-      if (tableCell) {
-        translation.style.fontSize =
-          document.defaultView?.getComputedStyle(candidate.element).fontSize ||
-          '1rem';
-      }
-      translation.setAttribute(TRANSLATION_ATTRIBUTE, candidate.id);
-      translation.lang = options.targetLanguage;
-      renderTranslatedContent(translation, text, candidate.inlineElements);
-      if (tableCell) {
-        candidate.element.append(translation);
-      } else {
-        candidate.element.after(translation);
-      }
-      insertedTranslations.set(candidate.element, translation);
-      failedElements.delete(candidate.element);
-      inserted += 1;
     }
-    applyDisplayMode(current.displayMode);
     if (failedElements.size > 0) {
       logger?.warn('Page translation completed with missing results.', {
         pageRevision: revision,
@@ -369,7 +442,9 @@ export function createPageTranslation({
       ...current,
       status: failures.some((failure) => isBlockingCategory(failure.category))
         ? 'failed'
-        : 'translated',
+        : activeRequests.size > 0 || pending.size > 0
+          ? 'translating'
+          : 'translated',
       translatedUnitCount: insertedTranslations.size,
       failedUnitCount: failedElements.size,
       failure:
@@ -397,8 +472,17 @@ export function createPageTranslation({
 
   function createCandidate(element: HTMLElement): Candidate {
     const { id, number } = assignUnitIdentity(element);
-    const { text, inlineElements } = encodeInlineContent(element);
-    return { element, id, number, encodedText: text, inlineElements };
+    const { text, signature, inlineElements, preservedElements } =
+      encodeInlineContent(element);
+    return {
+      element,
+      id,
+      number,
+      encodedText: text,
+      signature,
+      inlineElements,
+      preservedElements,
+    };
   }
 
   function assignUnitIdentity(element: HTMLElement): {
@@ -436,8 +520,12 @@ export function createPageTranslation({
 
   function handleNavigation() {
     if (!activeOptions) return;
+    const nextUrl = document.location.href;
+    if (nextUrl === pageUrl) return;
+    pageUrl = nextUrl;
     sessionToken += 1;
     cancel?.();
+    activeRequests.clear();
     removeTranslations();
     pending.clear();
     failedElements.clear();
@@ -452,7 +540,9 @@ export function createPageTranslation({
       totalUnitCount: 0,
       pageRevision: current.pageRevision + 1,
     });
-    schedule(findCandidates(document, activeOptions.contentScope ?? 'main'));
+    schedule(
+      findCandidates(document, activeOptions.contentScope ?? 'main', selectors),
+    );
   }
 
   function observePage() {
@@ -473,14 +563,32 @@ export function createPageTranslation({
         );
       });
       if (!changesSource) return;
+      for (const record of records) {
+        const target =
+          record.target instanceof Element
+            ? record.target
+            : record.target.parentElement;
+        if (target && !target.closest(`[${TRANSLATION_ATTRIBUTE}]`)) {
+          mutationRoots.add(
+            target.closest(CONTENT_CANDIDATE_SELECTOR) ?? target,
+          );
+        }
+      }
       if (mutationScheduled || !activeOptions) return;
       mutationScheduled = true;
       queueMicrotask(() => {
         mutationScheduled = false;
+        const roots = [...mutationRoots];
+        mutationRoots.clear();
         if (activeOptions) {
-          refreshChangedContent();
+          refreshChangedContent(roots);
           schedule(
-            findCandidates(document, activeOptions.contentScope ?? 'main'),
+            findCandidates(
+              document,
+              activeOptions.contentScope ?? 'main',
+              selectors,
+              roots,
+            ),
           );
         }
       });
@@ -506,7 +614,9 @@ export function createPageTranslation({
     }
     document.defaultView?.addEventListener('popstate', handleNavigation);
     const view = document.defaultView;
-    if (view) {
+    if (watchNavigation) {
+      restoreHistory = watchNavigation(handleNavigation);
+    } else if (view) {
       const { history } = view;
       const originalPushState = history.pushState.bind(history);
       const originalReplaceState = history.replaceState.bind(history);
@@ -534,7 +644,9 @@ export function createPageTranslation({
         });
       }
       activeOptions = options;
+      pageUrl = document.location.href;
       sessionToken += 1;
+      const token = sessionToken;
       publish({
         ...current,
         status: 'translating',
@@ -543,10 +655,31 @@ export function createPageTranslation({
         totalUnitCount: 0,
         failure: undefined,
       });
+      if (getRuleSelectors) {
+        try {
+          const resolved = await getRuleSelectors();
+          for (const group of Object.values(resolved)) {
+            for (const selector of group) document.querySelector(selector);
+          }
+          if (token !== sessionToken || !activeOptions) return current;
+          selectors = resolved;
+        } catch {
+          if (token !== sessionToken || !activeOptions) return current;
+          return publish({
+            ...current,
+            status: 'failed',
+            failure: {
+              category: 'invalid-request',
+              message: 'Could not load valid site rules.',
+            },
+          });
+        }
+      }
       observePage();
       const candidates = findCandidates(
         document,
         options.contentScope ?? 'main',
+        selectors,
       );
       if (options.translateImmediately !== false || !intersectionObserver) {
         await translateElements(candidates);
@@ -590,6 +723,8 @@ export function createPageTranslation({
       sessionToken += 1;
       activeOptions = undefined;
       cancel?.();
+      activeRequests.clear();
+      mutationRoots.clear();
       observer?.disconnect();
       intersectionObserver?.disconnect();
       observer = undefined;
@@ -646,18 +781,50 @@ function isGloballyPaused(snapshot: SessionSnapshot): boolean {
 function findCandidates(
   document: Document,
   scope: ContentScope,
+  selectors: RuleSelectors,
+  changedRoots?: Element[],
 ): HTMLElement[] {
+  const roots = [
+    ...(selectors.main ?? []),
+    ...(scope === 'main-and-interface' ? (selectors.interface ?? []) : []),
+  ].flatMap((selector) => [
+    ...document.querySelectorAll<HTMLElement>(selector),
+  ]);
   return [
-    ...document.querySelectorAll<HTMLElement>(CONTENT_CANDIDATE_SELECTOR),
+    ...new Set([
+      ...(changedRoots ?? [document.documentElement]).flatMap((root) => [
+        ...(root.matches(CONTENT_CANDIDATE_SELECTOR)
+          ? [root as HTMLElement]
+          : []),
+        ...root.querySelectorAll<HTMLElement>(CONTENT_CANDIDATE_SELECTOR),
+      ]),
+      ...roots.filter(
+        (root) =>
+          !changedRoots ||
+          changedRoots.some(
+            (changed) => changed.contains(root) || root.contains(changed),
+          ),
+      ),
+    ]),
   ].filter(
     (element) =>
       !element.closest(`[${TRANSLATION_ATTRIBUTE}]`) &&
       canTranslateContent(element) &&
+      !(selectors.exclude ?? []).some(
+        (selector) =>
+          element.closest(selector) || element.querySelector(selector),
+      ) &&
+      ((selectors.main?.length ?? 0) === 0 ||
+        selectors.main?.some((selector) => element.closest(selector)) ||
+        (scope === 'main-and-interface' &&
+          selectors.interface?.some((selector) =>
+            element.closest(selector),
+          ))) &&
       (scope === 'main-and-interface' ||
         !element.closest(INTERFACE_SELECTOR)) &&
-      (!isTableCell(element) ||
-        !element.querySelector(CONTENT_CANDIDATE_SELECTOR)) &&
-      isContentCandidate(element, scope),
+      !element.querySelector(CONTENT_CANDIDATE_SELECTOR) &&
+      (roots.some((root) => root.contains(element)) ||
+        isContentCandidate(element, scope)),
   );
 }
 
@@ -666,7 +833,9 @@ function canTranslateContent(element: HTMLElement): boolean {
   // intact so textContent cannot carry private descendants into the request.
   return (
     !element.closest(PROTECTED_SELECTOR) &&
-    !element.querySelector(PROTECTED_SELECTOR) &&
+    [...element.querySelectorAll(PROTECTED_SELECTOR)].every(
+      (child) => child.tagName === 'CODE' && !child.closest('pre'),
+    ) &&
     isVisible(element) &&
     [...element.querySelectorAll<HTMLElement>('*')].every(isVisible)
   );
@@ -715,14 +884,22 @@ function isContentCandidate(
 
 function encodeInlineContent(element: HTMLElement): {
   text: string;
+  signature: string;
   inlineElements: Map<string, HTMLElement>;
+  preservedElements: Map<string, HTMLElement>;
 } {
   let nextMarker = 1;
   const inlineElements = new Map<string, HTMLElement>();
+  const preservedElements = new Map<string, HTMLElement>();
   function encode(node: Node): string {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
     if (node instanceof Element && node.hasAttribute(TRANSLATION_ATTRIBUTE))
       return '';
+    if (node instanceof HTMLElement && node.tagName === 'CODE') {
+      const marker = String(nextMarker++);
+      preservedElements.set(marker, node);
+      return `⟦KEEP:${marker}⟧`;
+    }
     if (!(node instanceof HTMLElement) || !INLINE_TAGS.has(node.tagName)) {
       return [...node.childNodes].map(encode).join('');
     }
@@ -730,9 +907,15 @@ function encodeInlineContent(element: HTMLElement): {
     inlineElements.set(marker, node);
     return `⟦${marker}⟧${[...node.childNodes].map(encode).join('')}⟦/${marker}⟧`;
   }
+  const text = [...element.childNodes].map(encode).join('').trim();
   return {
-    text: [...element.childNodes].map(encode).join('').trim(),
+    text,
+    signature: JSON.stringify([
+      text,
+      [...preservedElements.values()].map((node) => node.outerHTML),
+    ]),
     inlineElements,
+    preservedElements,
   };
 }
 
@@ -740,11 +923,12 @@ function renderTranslatedContent(
   target: HTMLElement,
   text: string,
   inlineElements: Map<string, HTMLElement>,
+  preservedElements: Map<string, HTMLElement>,
 ) {
   const stack: Array<{ element: HTMLElement; marker?: string }> = [
     { element: target },
   ];
-  const markerPattern = /⟦(\/)?(\d+)⟧/g;
+  const markerPattern = /⟦(?:(\/)?(\d+)|KEEP:(\d+))⟧/g;
   let cursor = 0;
   for (const match of text.matchAll(markerPattern)) {
     stack
@@ -752,8 +936,20 @@ function renderTranslatedContent(
       ?.element.append(
         target.ownerDocument.createTextNode(text.slice(cursor, match.index)),
       );
-    const [, closing, marker] = match;
-    if (closing) {
+    const [, closing, marker, kept] = match;
+    if (kept) {
+      const source = preservedElements.get(kept);
+      if (source) {
+        const clone = source.cloneNode(true) as HTMLElement;
+        for (const node of [clone, ...clone.querySelectorAll('*')]) {
+          for (const attribute of [...node.attributes]) {
+            if (attribute.name.startsWith('on') || attribute.name === 'id')
+              node.removeAttribute(attribute.name);
+          }
+        }
+        stack.at(-1)?.element.append(clone);
+      }
+    } else if (closing) {
       if (stack.at(-1)?.marker === marker) stack.pop();
     } else {
       const source = inlineElements.get(marker);

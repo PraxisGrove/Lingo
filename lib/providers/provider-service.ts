@@ -59,7 +59,7 @@ export async function createProviderChain(
       const credential = await getCredential(profile.id);
       return {
         ...createProvider(profile, credential ?? ''),
-        id: `${profile.id}:${profile.model ?? ''}`,
+        id: await cacheIdentity(profile),
       };
     }),
   );
@@ -69,6 +69,24 @@ export async function createProviderChain(
       'Configure a translation service first.',
     );
   return providers;
+}
+
+async function cacheIdentity(profile: ProviderProfile): Promise<string> {
+  const configuration = JSON.stringify([
+    profile.provider,
+    profile.endpoint,
+    profile.model,
+    profile.region,
+    profile.nativeGlossaryId,
+  ]);
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(configuration),
+  );
+  const hash = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+  return `${profile.id}:${hash}`;
 }
 
 export async function testProviderProfile(

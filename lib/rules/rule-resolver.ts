@@ -54,7 +54,59 @@ export const BUILT_IN_RULES: RuleSet = {
       id: 'default-mdn',
       domain: 'developer.mozilla.org',
       translationPolicy: 'default',
-      selectors: { main: ['main'], exclude: ['pre', 'code'] },
+      selectors: { main: ['main'], exclude: ['pre'] },
+    },
+    {
+      id: 'github-reading',
+      domain: 'github.com',
+      selectors: {
+        main: ['.markdown-body'],
+        exclude: ['.highlight', '.js-comment-edit-form'],
+      },
+    },
+    {
+      id: 'stackoverflow-reading',
+      domain: 'stackoverflow.com',
+      selectors: { main: ['.s-prose'], exclude: ['.js-voting-container'] },
+    },
+    {
+      id: 'hackernews-reading',
+      domain: 'news.ycombinator.com',
+      selectors: { main: ['.commtext', '.titleline'], exclude: ['.reply'] },
+    },
+    {
+      id: 'reddit-reading',
+      domain: 'www.reddit.com',
+      selectors: {
+        main: ['[slot="text-body"]', '[data-testid="post-content"]'],
+        exclude: ['[data-testid="advertisement"]'],
+      },
+    },
+    {
+      id: 'arxiv-reading',
+      domain: 'arxiv.org',
+      selectors: {
+        main: ['#abs .abstract', '#abs .title'],
+        exclude: ['.metatable'],
+      },
+    },
+    {
+      id: 'python-docs-reading',
+      domain: 'docs.python.org',
+      selectors: {
+        main: ['.body', '[role="main"]'],
+        exclude: ['.sphinxsidebar'],
+      },
+    },
+    {
+      id: 'react-docs-reading',
+      domain: 'react.dev',
+      selectors: { main: ['main'], exclude: ['nav', 'pre'] },
+    },
+    {
+      id: 'next-docs-reading',
+      domain: 'nextjs.org',
+      selectors: { main: ['article'], exclude: ['nav', 'pre'] },
     },
   ],
 };

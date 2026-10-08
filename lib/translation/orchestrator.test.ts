@@ -10,6 +10,87 @@ import {
 import { resolveTranslationQuality } from './quality';
 
 describe('TranslationOrchestrator', () => {
+  it('splits long pages on paragraph boundaries using a character budget', async () => {
+    const batches: string[][] = [];
+    const configured = provider(async (input) => {
+      batches.push(input.units.map((unit) => unit.text));
+      return input.units;
+    });
+    const orchestrator = createTranslationOrchestrator({
+      ...configured,
+      capabilities: {
+        ...configured.capabilities,
+        maxBatchSize: 50,
+        maxBatchCharacters: 8,
+      },
+    });
+    for await (const _event of orchestrator.translate({
+      sessionId: 'budget',
+      pageRevision: 0,
+      sourceLanguage: 'auto',
+      targetLanguage: 'zh-CN',
+      units: [
+        { id: '1', number: 1, text: 'First.' },
+        { id: '2', number: 2, text: 'Second.' },
+        { id: '3', number: 3, text: 'A long paragraph kept intact.' },
+      ],
+    })) {
+      /* Drain the public event stream. */
+    }
+    expect(batches).toEqual([
+      ['First.'],
+      ['Second.'],
+      ['A long paragraph kept intact.'],
+    ]);
+  });
+
+  it('stops later batches after a blocking provider error', async () => {
+    const translateBatch = vi.fn<TranslationProvider['translateBatch']>(
+      async () => {
+        throw { category: 'quota' };
+      },
+    );
+    const configured = provider(translateBatch);
+    const orchestrator = createTranslationOrchestrator(
+      {
+        ...configured,
+        capabilities: { ...configured.capabilities, maxBatchSize: 1 },
+      },
+      { maxConcurrentBatches: 1 },
+    );
+    const events = [];
+    for await (const event of orchestrator.translate({
+      sessionId: 'blocking',
+      pageRevision: 0,
+      sourceLanguage: 'auto',
+      targetLanguage: 'zh-CN',
+      units: [
+        { id: '1', number: 1, text: 'First.' },
+        { id: '2', number: 2, text: 'Second.' },
+      ],
+    }))
+      events.push(event);
+    expect(translateBatch).toHaveBeenCalledTimes(1);
+    expect(events.filter((event) => event.type === 'failed')).toHaveLength(2);
+  });
+
+  it('aborts the timed-out network request before retrying', async () => {
+    const signals: AbortSignal[] = [];
+    const orchestrator = createTranslationOrchestrator(
+      provider(async (input) => {
+        if (!input.signal) throw new Error('Missing cancellation signal.');
+        signals.push(input.signal);
+        if (signals.length === 1) return new Promise(() => {});
+        expect(signals[0].aborted).toBe(true);
+        return input.units;
+      }),
+      { timeoutMs: 10, wait: async () => {} },
+    );
+    const events = await collect(orchestrator);
+    expect(signals).toHaveLength(2);
+    expect(events.some((event) => event.type === 'translated')).toBe(true);
+  });
+
   it('emits a translated result for every queued unit', async () => {
     const orchestrator = createTranslationOrchestrator({
       capabilities: {

@@ -56,7 +56,9 @@ export default defineBackground(() => {
     },
     getTargetLanguage: async () => (await getSettings()).targetLanguage,
     getSnapshot: (tabId) =>
-      browser.tabs.sendMessage(tabId, createMessage('getPageTranslation', {})),
+      browser.tabs.sendMessage(tabId, createMessage('getPageTranslation', {}), {
+        frameId: 0,
+      }),
     start: (tabId, options) =>
       browser.tabs.sendMessage(
         tabId,
@@ -72,6 +74,16 @@ export default defineBackground(() => {
   });
 
   logger.info('Background service worker started.');
+
+  browser.webNavigation.onHistoryStateUpdated.addListener((details) => {
+    void browser.tabs
+      .sendMessage(details.tabId, createMessage('pageNavigation', {}), {
+        frameId: details.frameId,
+      })
+      .catch(() => {
+        // Some browser pages do not permit a content script.
+      });
+  });
 
   let menuUpdate = Promise.resolve();
   function refreshLocalizedMenus(

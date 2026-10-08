@@ -15,6 +15,63 @@ import {
 import { createPageTranslation } from './page-translation';
 
 describe('translation port flow', () => {
+  it('renders the first completed batch while a later batch is still pending', async () => {
+    document.body.innerHTML =
+      '<main><p>Fast paragraph.</p><p>Slow paragraph.</p></main>';
+    const provider = createInMemoryProvider();
+    let release: (() => void) | undefined;
+    const [contentPort, backgroundPort] = createPortPair([]);
+    serveTranslationPort(
+      backgroundPort,
+      createTranslationOrchestrator({
+        ...provider,
+        capabilities: { ...provider.capabilities, maxBatchSize: 1 },
+        async translateBatch(input) {
+          if (input.units[0].text === 'Slow paragraph.')
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+          return provider.translateBatch(input);
+        },
+      }),
+      (error) => {
+        throw error;
+      },
+    );
+    const client = createTranslationPortClient(() => contentPort);
+    const session = createPageTranslation({
+      document,
+      translate: client.translate,
+      cancel: client.cancel,
+    });
+    const started = session.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+    });
+    try {
+      await vi.waitFor(() =>
+        expect(
+          document.querySelector('[data-lingo-translation]')?.textContent,
+        ).toBe('[zh-CN] Fast paragraph.'),
+      );
+      expect(session.snapshot()).toMatchObject({
+        status: 'translating',
+        translatedUnitCount: 1,
+        totalUnitCount: 2,
+      });
+      release?.();
+      await started;
+      expect(session.snapshot()).toMatchObject({
+        status: 'translated',
+        translatedUnitCount: 2,
+      });
+    } finally {
+      release?.();
+      await session.stop();
+      client.disconnect();
+    }
+  });
+
   it('uses saved source language for provider requests across the port', async () => {
     const [contentPort, backgroundPort] = createPortPair([]);
     const provider = createInMemoryProvider();

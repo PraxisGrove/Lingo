@@ -417,6 +417,7 @@ async function loadActivePage(): Promise<{
       snapshot: await browser.tabs.sendMessage(
         tab.id,
         createMessage('getPageTranslation', {}),
+        { frameId: 0 },
       ),
     };
   } catch (error) {
@@ -433,7 +434,11 @@ async function sendToActiveTab<TName extends PageMessageName>(
 ): Promise<ExtensionMessages[TName]['response']> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   if (tab?.id === undefined) throw new Error('No active tab.');
-  return browser.tabs.sendMessage(tab.id, createMessage(type, payload));
+  return browser.tabs.sendMessage(
+    tab.id,
+    createMessage(type, payload),
+    type === 'getPageTranslation' ? { frameId: 0 } : undefined,
+  );
 }
 
 function statusLabel(snapshot: SessionSnapshot | null): MessageKey {

@@ -22,10 +22,36 @@ describe('createProviderChain', () => {
       async () => 'credential',
     );
 
-    expect(chain.map((provider) => provider.id)).toEqual([
-      'primary:',
-      'secondary:model-b',
-    ]);
+    expect(chain[0].id).toMatch(/^primary:[a-f0-9]{64}$/);
+    expect(chain[1].id).toMatch(/^secondary:[a-f0-9]{64}$/);
+  });
+
+  it('invalidates cache identity when a profile changes service configuration but preserves renames', async () => {
+    const profile = {
+      id: 'primary',
+      name: 'Primary',
+      provider: 'openai-compatible' as const,
+      endpoint: 'https://first.example/v1',
+      model: 'model-a',
+    };
+    const identity = async (patch: Partial<typeof profile>) =>
+      (
+        await createProviderChain(
+          {
+            ...DEFAULT_SETTINGS,
+            activeProviderProfileId: profile.id,
+            providerProfiles: [{ ...profile, ...patch }],
+          },
+          async () => 'credential',
+        )
+      )[0].id;
+    const original = await identity({});
+    expect(await identity({ endpoint: 'https://second.example/v1' })).not.toBe(
+      original,
+    );
+    expect(await identity({ model: 'model-b' })).not.toBe(original);
+    expect(await identity({ name: 'Renamed' })).toBe(original);
+    expect(original).not.toContain('first.example');
   });
 });
 

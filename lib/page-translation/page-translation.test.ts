@@ -27,6 +27,36 @@ const createPageTranslation: typeof createPageTranslationImplementation = (
 };
 
 describe('PageTranslation', () => {
+  it('limits layout inspection to the changed paragraph on a long page', async () => {
+    document.body.innerHTML = `<main>${Array.from({ length: 100 }, (_, index) => `<p>Paragraph ${index}.</p>`).join('')}</main>`;
+    const styleReads = vi.spyOn(window, 'getComputedStyle');
+    const session = createPageTranslation({
+      document,
+      translate: async (units) => units,
+    });
+    try {
+      await session.start({
+        targetLanguage: 'zh-CN',
+        displayMode: 'bilingual',
+      });
+      expect(styleReads.mock.calls.length).toBeGreaterThan(100);
+      styleReads.mockClear();
+      const paragraph = document.querySelector('p');
+      if (!paragraph) throw new Error('Missing source paragraph.');
+      paragraph.textContent = 'Changed paragraph.';
+      await vi.waitFor(() =>
+        expect(
+          document.querySelector('[data-lingo-translation]')?.textContent,
+        ).toBe('Changed paragraph.'),
+      );
+      expect(styleReads.mock.calls.length).toBeGreaterThan(0);
+      expect(styleReads.mock.calls.length).toBeLessThan(60);
+    } finally {
+      styleReads.mockRestore();
+      await session.stop();
+    }
+  });
+
   it.each([
     'bilingual',
     'translation',
@@ -324,7 +354,9 @@ describe('PageTranslation', () => {
     );
     await Promise.resolve();
     await Promise.resolve();
-    expect(pageTranslation.snapshot()).toMatchObject({ status: 'failed' });
+    await vi.waitFor(() =>
+      expect(pageTranslation.snapshot()).toMatchObject({ status: 'failed' }),
+    );
     expect(translate).toHaveBeenCalledTimes(1);
 
     callback(
@@ -612,7 +644,10 @@ describe('PageTranslation', () => {
 
     await session.start({ targetLanguage: 'zh-CN', displayMode: 'bilingual' });
 
-    expect(texts).toEqual(['Ordinary public paragraph.']);
+    expect(texts).toEqual(['Example ⟦KEEP:1⟧.', 'Ordinary public paragraph.']);
+    expect(
+      document.querySelector('[data-lingo-translation] code')?.textContent,
+    ).toBe('secret_token');
     await session.stop();
     expect(document.body.innerHTML).toBe(originalMarkup);
   });

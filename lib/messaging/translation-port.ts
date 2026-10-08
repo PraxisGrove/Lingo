@@ -162,6 +162,7 @@ export type TranslationPortClient = {
   translate(
     units: TranslationUnit[],
     targetLanguage: string,
+    onProgress?: (translations: TranslationUnit[]) => void,
   ): Promise<TranslationClientResult>;
   cancel(): void;
   disconnect(): void;
@@ -210,7 +211,7 @@ export function createTranslationPortClient(
   };
 
   return {
-    async translate(units, targetLanguage) {
+    async translate(units, targetLanguage, onProgress) {
       if (closed) {
         return Promise.reject(
           disconnectError('The translation client was closed.'),
@@ -220,7 +221,7 @@ export function createTranslationPortClient(
       const sessionId = createSessionId();
 
       return new Promise((resolve, reject) => {
-        const translations: TranslationUnit[] = [];
+        const translations = new Map<string, TranslationUnit>();
         const failures: TranslationClientFailure[] = [];
         let reconnectAttempts = 0;
         let listenerPort = activePort;
@@ -271,14 +272,25 @@ export function createTranslationPortClient(
 
           if (event.type === 'translated') {
             const unit = units.find((item) => item.id === event.unitId);
-            if (unit) translations.push({ ...unit, text: event.text });
+            if (unit && !translations.has(unit.id)) {
+              const translated = { ...unit, text: event.text };
+              translations.set(unit.id, translated);
+              onProgress?.([translated]);
+            }
           } else if (event.type === 'completed') {
             cleanup();
-            const failure = failures[0];
-            if (failure && translations.length === 0) {
+            const remainingFailures = failures.filter(
+              (item) => !translations.has(item.unitId),
+            );
+            const result = units.flatMap(
+              (unit) => translations.get(unit.id) ?? [],
+            );
+            const failure = remainingFailures[0];
+            if (failure && result.length === 0) {
               reject(translationError(failure));
-            } else if (failure) resolve({ translations, failures });
-            else resolve(translations);
+            } else if (failure)
+              resolve({ translations: result, failures: remainingFailures });
+            else resolve(result);
           } else if (event.type === 'failed') {
             failures.push({
               unitId: event.unitId,
@@ -305,7 +317,7 @@ export function createTranslationPortClient(
                 targetLanguage,
                 pageTitle: getPageTitle(),
                 siteHostname: getSiteHostname(),
-                units,
+                units: units.filter((unit) => !translations.has(unit.id)),
               },
             } satisfies TranslationPortRequest);
           } catch (error) {

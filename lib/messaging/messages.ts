@@ -9,6 +9,10 @@ import type { ProviderProfile } from '@/lib/storage/settings-model';
 export type MessageSource = 'popup' | 'options' | 'content';
 
 export type ExtensionMessages = {
+  pageNavigation: {
+    request: Record<string, never>;
+    response: PageTranslationSnapshot;
+  };
   ping: {
     request: {
       source: MessageSource;
@@ -103,6 +107,7 @@ export function isExtensionMessage(
         )
       );
     case 'getPageTranslation':
+    case 'pageNavigation':
     case 'stopPageTranslation':
     case 'clearTranslationCache':
     case 'getExtensionStatus':

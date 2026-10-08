@@ -27,3 +27,10 @@ translation policy and only to the service the reader selected.
 
 Lingo does not execute remote code. Community site-rule updates are signed,
 schema-validated declarative data.
+
+## `webNavigation`
+
+Lingo listens for History API navigation in single-page applications and tells
+only the corresponding tab/frame to invalidate its old translation session.
+It does not store navigation URLs or history, and an inactive session does not
+scan or send page content in response to these notifications.

@@ -43,7 +43,11 @@ export function createAutomaticTranslationStarter(
       sourceLanguage: document.documentElement.lang || undefined,
       global: settings.autoTranslation,
       site: rules,
-      isDefaultAutoSite: builtIn.matchedRuleIds.length > 0,
+      isDefaultAutoSite: BUILT_IN_RULES.rules.some(
+        (rule) =>
+          rule.translationPolicy === 'default' &&
+          builtIn.matchedRuleIds.includes(rule.id),
+      ),
     });
     if (!preferences.autoTranslate) return;
 

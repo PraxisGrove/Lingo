@@ -25,7 +25,10 @@ pre-commit:
     08-build-firefox:
       run: pnpm build:firefox
       interactive: true
-    09-whitespace:
+    09-extension-test:
+      run: pnpm test:extension
+      interactive: true
+    10-whitespace:
       run: git diff --check
 
 commit-msg:

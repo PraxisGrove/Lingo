@@ -61,6 +61,9 @@ export function createProvider(
   const capabilities = {
     ...BASE_CAPABILITIES,
     maxBatchSize: definition?.maxBatchSize ?? BASE_CAPABILITIES.maxBatchSize,
+    // Conservative per-request budgets; a single paragraph is never truncated.
+    maxBatchCharacters:
+      profile.provider === 'openai-compatible' ? 12_000 : 24_000,
     supportsContext: profile.provider === 'openai-compatible',
     supportsStructuredOutput: profile.provider === 'openai-compatible',
     supportsNativeGlossary: profile.provider === 'deepl',
@@ -234,6 +237,7 @@ function structuredInstruction(input: ProviderBatchInput): string {
       ? `Translate to ${input.targetLanguage}.`
       : `Translate from ${input.sourceLanguage} to ${input.targetLanguage}.`,
     instructionForQuality(input.quality),
+    'Preserve all ⟦number⟧, ⟦/number⟧ and ⟦KEEP:number⟧ markers exactly once. Paired markers must stay correctly nested; KEEP markers represent content that must remain untouched.',
     'Return a JSON object with a translations array. Each item must contain the supplied stable id and its translated text.',
   ];
   if (input.quality.glossary.length > 0) {

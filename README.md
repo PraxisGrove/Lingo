@@ -15,6 +15,8 @@ retries, and local caching.
   service profiles, connection tests, and explicitly configured fallback chains.
 - Viewport-based translation, full-page translation, dynamically added
   and updated paragraphs, partial-failure retries, and original-page restoration.
+- Completed batches appear while remaining requests are still running. Long
+  pages are grouped by paragraph count and conservative character budgets.
 - Saved source-language selection is applied in the background to translation
   requests and cache keys. Stopping a session cancels queued work and aborts
   pending requests; translation can be started again without reloading the page.
@@ -22,18 +24,30 @@ retries, and local caching.
   lists, captions, and tables preserved.
 - Site and source-language automatic translation policies, local rule
   import/export, terminology, and translation instructions.
+- Reading-area rules for ten representative site layouts, with user-defined
+  main, interface, and exclusion selectors applied to manual and automatic
+  translation. Layout rules do not automatically enable new sites.
 - Popup controls, settings, keyboard shortcuts, context menus, an optional
   floating control, and localized interfaces.
 - Local translation cache, cache controls, and redacted diagnostic exports.
 
 Paragraphs containing protected or hidden content are kept intact and excluded
-from translation requests, including inline code and `translate="no"` spans.
-Queued paragraphs are checked again before they are sent.
+from translation requests. Visible inline code is represented by opaque markers,
+so surrounding prose can be translated without sending the code. Code blocks
+and `translate="no"` spans remain excluded. Queued paragraphs are checked again
+before they are sent; invalid marker responses are rejected.
 
-This is still a development version. Site selector integration, community rule
-distribution, production SPA recovery, and full extension acceptance testing
-remain work for the implementation roadmap. Automated provider tests use
-fixtures; they do not verify live accounts or billing.
+This is still a development version. History API navigation is handled through
+browser navigation events for the corresponding tab/frame. Installed Chromium
+extension tests cover popup controls, rules, iframe translation, streaming,
+cancellation, SPA navigation, and worker restart against a local HTTP provider.
+Chromium and Firefox also run the same local page-layout fixtures.
+
+The fixtures are representative layouts, not a guarantee that every live page
+on those sites is supported. Community rule distribution, real provider account
+validation, Firefox extension installation acceptance, Shadow DOM, and extremely
+long single-paragraph splitting remain work for the roadmap. Local provider
+contracts do not verify translation quality, account limits, or billing.
 
 ## Try It
 
@@ -66,10 +80,15 @@ pnpm browser:install
 pnpm test:browser
 pnpm check
 pnpm build
+pnpm test:extension
 ```
 
 Use `pnpm dev:firefox`, `pnpm build:firefox`, or `pnpm zip:firefox` for
 Firefox. Chrome and Edge use the default Chromium build.
+
+Run `pnpm build` before `pnpm test:extension`. The installed-extension suite
+uses a temporary Chromium profile and a local test service; it never accesses
+personal browser profiles or sends content to a paid translation service.
 
 ## Privacy and Permissions
 

@@ -1,5 +1,6 @@
 import type { TranslationCache } from '../cache/translation-cache';
 import type { Logger } from '../logger/logger';
+import { preservesInlineMarkers } from './inline-markers';
 import { resolveTranslationQuality, type TranslationQuality } from './quality';
 import type {
   TranslationEvent,
@@ -27,6 +28,7 @@ export type ProviderBatchResult = Array<{
 
 export type ProviderCapabilities = {
   maxBatchSize: number;
+  maxBatchCharacters?: number;
   supportsContext: boolean;
   supportsNativeGlossary: boolean;
   supportsStructuredOutput: boolean;
@@ -83,7 +85,12 @@ export function createTranslationOrchestrator(
           ? await options.quality(request)
           : resolveTranslationQuality();
 
-        const outcomes = await translateUnits(
+        const ready: Outcome[] = [];
+        let wake: (() => void) | undefined;
+        let finished = false;
+        let failure: unknown;
+        let outcomes: Outcome[] = [];
+        const work = translateUnits(
           request,
           [
             ...(typeof provider === 'function' ? await provider() : [provider]),
@@ -96,12 +103,34 @@ export function createTranslationOrchestrator(
           timeoutMs,
           wait,
           controller.signal,
+          (outcome) => {
+            ready.push(outcome);
+            wake?.();
+          },
           options.logger,
-        );
+        )
+          .then(
+            (result) => {
+              outcomes = result;
+            },
+            (error: unknown) => {
+              failure = error;
+            },
+          )
+          .finally(() => {
+            finished = true;
+            wake?.();
+          });
 
-        if (controller.signal.aborted) return;
-        for (const outcome of outcomes) {
+        while (!finished || ready.length > 0) {
           if (controller.signal.aborted) return;
+          const outcome = ready.shift();
+          if (!outcome) {
+            await new Promise<void>((resolve) => {
+              wake = resolve;
+            });
+            continue;
+          }
           if (outcome.type === 'paused') {
             yield {
               ...outcome,
@@ -121,6 +150,9 @@ export function createTranslationOrchestrator(
             };
           }
         }
+        await work;
+        if (failure) throw failure;
+        if (controller.signal.aborted) return;
 
         yield {
           type: 'completed',
@@ -140,6 +172,7 @@ export function createTranslationOrchestrator(
           ).length,
         });
       } finally {
+        controller.abort();
         if (activeSessions.get(request.sessionId) === controller) {
           activeSessions.delete(request.sessionId);
         }
@@ -169,6 +202,7 @@ async function translateUnits(
   timeoutMs: number,
   wait: (milliseconds: number) => Promise<void>,
   signal: AbortSignal,
+  emit: (outcome: Outcome) => void,
   logger?: Logger,
 ): Promise<Outcome[]> {
   const outcomes: Outcome[] = [];
@@ -185,19 +219,38 @@ async function translateUnits(
         qualityVersion: quality.version,
         text: unit.text,
       });
-      if (cached === undefined) unresolved.push(unit);
-      else outcomes.push({ type: 'translated', unitId: unit.id, text: cached });
+      if (cached === undefined || !preservesInlineMarkers(unit.text, cached))
+        unresolved.push(unit);
+      else {
+        const outcome: Outcome = {
+          type: 'translated',
+          unitId: unit.id,
+          text: cached,
+        };
+        outcomes.push(outcome);
+        emit(outcome);
+      }
     }
     if (unresolved.length === 0) return outcomes;
 
     const batches = split(
       unresolved,
       normalizedBatchSize(provider.capabilities.maxBatchSize),
+      provider.capabilities.maxBatchCharacters ?? Number.POSITIVE_INFINITY,
     );
+    let blockingFailure: unknown;
     const batchOutcomes = await mapConcurrent(
       batches,
       maxConcurrentBatches,
       async (units) => {
+        if (blockingFailure) {
+          if (
+            isFallbackError(blockingFailure) &&
+            providerIndex < providers.length - 1
+          )
+            return [];
+          return failedOutcomes(units, blockingFailure);
+        }
         try {
           const results = await attemptBatch(
             provider,
@@ -247,6 +300,12 @@ async function translateUnits(
           return found;
         } catch (error) {
           if (signal.aborted) return [];
+          if (
+            ['authentication', 'quota', 'rate-limit'].includes(
+              category(error) ?? '',
+            )
+          )
+            blockingFailure = error;
           const willUseFallback =
             isFallbackError(error) && providerIndex < providers.length - 1;
           if (willUseFallback) {
@@ -264,13 +323,11 @@ async function translateUnits(
             unitCount: units.length,
             error,
           });
-          return units.map((unit) => ({
-            type: 'failed' as const,
-            unitId: unit.id,
-            category: category(error) ?? 'unknown',
-            message: errorMessage(error),
-          }));
+          return failedOutcomes(units, error);
         }
+      },
+      (found) => {
+        for (const outcome of found) emit(outcome);
       },
     );
     const flattened = batchOutcomes.flat();
@@ -289,14 +346,25 @@ async function translateUnits(
       (unit) => !resolvedIds.has(unit.id) && !failedIds.has(unit.id),
     );
     if (pending.length > 0 && providerIndex < providers.length - 1) {
-      outcomes.push({
+      const outcome: Outcome = {
         type: 'paused',
         unitId: null,
         reason: 'Switching to an explicitly configured fallback service.',
-      });
+      };
+      outcomes.push(outcome);
+      emit(outcome);
     }
   }
   return outcomes;
+}
+
+function failedOutcomes(units: TranslationUnit[], error: unknown): Outcome[] {
+  return units.map((unit) => ({
+    type: 'failed',
+    unitId: unit.id,
+    category: category(error) ?? 'unknown',
+    message: errorMessage(error),
+  }));
 }
 
 function validatedResults(
@@ -304,6 +372,7 @@ function validatedResults(
   results: ProviderBatchResult,
 ): Map<string, string> {
   const requestedIds = new Set(units.map((unit) => unit.id));
+  const sources = new Map(units.map((unit) => [unit.id, unit.text]));
   const valid = new Map<string, string>();
   const invalidIds = new Set<string>();
   for (const result of results) {
@@ -311,6 +380,7 @@ function validatedResults(
       !requestedIds.has(result.id) ||
       typeof result.text !== 'string' ||
       result.text.trim().length === 0 ||
+      !preservesInlineMarkers(sources.get(result.id) ?? '', result.text) ||
       valid.has(result.id) ||
       invalidIds.has(result.id)
     ) {
@@ -338,10 +408,13 @@ async function attemptBatch(
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     signal.throwIfAborted();
+    const attemptController = new AbortController();
+    const onAbort = () => attemptController.abort(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
     try {
       return await withTimeout(
         provider.translateBatch({
-          signal,
+          signal: attemptController.signal,
           sourceLanguage: request.sourceLanguage,
           targetLanguage: request.targetLanguage,
           units,
@@ -352,6 +425,8 @@ async function attemptBatch(
         }),
         timeoutMs,
         signal,
+        () =>
+          attemptController.abort(new Error('Translation request timed out.')),
       );
     } catch (error) {
       lastError = error;
@@ -365,6 +440,9 @@ async function attemptBatch(
         error,
       });
       await wait(250 * 2 ** (attempt - 1));
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+      attemptController.abort();
     }
   }
   throw lastError;
@@ -400,10 +478,27 @@ function contextFor(
   };
 }
 
-function split<T>(items: T[], size: number): T[][] {
-  const batches: T[][] = [];
-  for (let index = 0; index < items.length; index += size)
-    batches.push(items.slice(index, index + size));
+function split(
+  items: TranslationUnit[],
+  size: number,
+  characterBudget: number,
+): TranslationUnit[][] {
+  const batches: TranslationUnit[][] = [];
+  let batch: TranslationUnit[] = [];
+  let characters = 0;
+  for (const unit of items) {
+    if (
+      batch.length > 0 &&
+      (batch.length >= size || characters + unit.text.length > characterBudget)
+    ) {
+      batches.push(batch);
+      batch = [];
+      characters = 0;
+    }
+    batch.push(unit);
+    characters += unit.text.length;
+  }
+  if (batch.length > 0) batches.push(batch);
   return batches;
 }
 
@@ -411,6 +506,7 @@ async function mapConcurrent<T, TResult>(
   items: T[],
   limit: number,
   map: (item: T) => Promise<TResult>,
+  onResult: (result: TResult) => void,
 ): Promise<TResult[]> {
   const results: TResult[] = [];
   let index = 0;
@@ -419,6 +515,7 @@ async function mapConcurrent<T, TResult>(
       while (index < items.length) {
         const itemIndex = index++;
         results[itemIndex] = await map(items[itemIndex]);
+        onResult(results[itemIndex]);
       }
     }),
   );
@@ -429,6 +526,7 @@ function withTimeout<T>(
   value: Promise<T>,
   milliseconds: number,
   signal: AbortSignal,
+  onTimeout: () => void,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const onAbort = () => {
@@ -438,6 +536,7 @@ function withTimeout<T>(
     const timer = setTimeout(() => {
       signal.removeEventListener('abort', onAbort);
       reject(new Error('Translation request timed out.'));
+      onTimeout();
     }, milliseconds);
     signal.addEventListener('abort', onAbort, { once: true });
     if (signal.aborted) onAbort();

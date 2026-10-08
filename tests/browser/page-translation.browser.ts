@@ -3,11 +3,37 @@ import { page } from 'vitest/browser';
 import pageTranslationCss from '../../entrypoints/page-translation.css?raw';
 import contentTypesFixture from '../../lib/page-translation/fixtures/content-types.html?raw';
 import { createPageTranslation } from '../../lib/page-translation/page-translation';
+import { BUILT_IN_RULES, resolveRules } from '../../lib/rules/rule-resolver';
+import { SITE_LAYOUTS, SITE_PARAGRAPH } from '../fixtures/site-layouts';
 import fixtureCss from './page-translation-fixture.css?raw';
 
 let stopTranslation: (() => Promise<void>) | undefined;
 
 describe('page translation browser fixture', () => {
+  it.each(
+    SITE_LAYOUTS,
+  )('applies reading-area rules on $hostname fixtures', async ({
+    hostname,
+    html,
+  }) => {
+    document.body.innerHTML = html;
+    const requests: string[] = [];
+    const session = createPageTranslation({
+      document,
+      getRuleSelectors: async () =>
+        resolveRules({ hostname, builtIn: BUILT_IN_RULES }).selectors,
+      async translate(units) {
+        requests.push(...units.map((unit) => unit.text));
+        return units;
+      },
+    });
+    stopTranslation = () => session.stop();
+    await session.start({ targetLanguage: 'zh-CN', displayMode: 'bilingual' });
+    expect(requests).toEqual([SITE_PARAGRAPH]);
+    await session.stop();
+    expect(document.body.innerHTML).toBe(html);
+  });
+
   it.each([
     'bilingual',
     'translation',

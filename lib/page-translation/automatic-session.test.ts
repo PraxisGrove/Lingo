@@ -6,6 +6,20 @@ import type { PageTranslation, StartSessionOptions } from './page-translation';
 const emptyRules = { schemaVersion: 1 as const, rules: [] };
 
 describe('automatic translation starter', () => {
+  it('does not enable automatic translation merely because a new reading-layout rule exists', async () => {
+    const starts: StartSessionOptions[] = [];
+    const start = createAutomaticTranslationStarter({
+      getSettings: async () => ({
+        ...DEFAULT_SETTINGS,
+        activeProviderProfileId: 'configured',
+      }),
+      getUserRules: async () => emptyRules,
+      getCommunityRules: async () => ({ updatesEnabled: true }),
+    });
+    await start(pageTranslation(starts), documentFor('github.com', 'en'));
+    expect(starts).toEqual([]);
+  });
+
   it('starts for a matching built-in default site with a configured provider', async () => {
     const starts: StartSessionOptions[] = [];
     const start = createAutomaticTranslationStarter({
