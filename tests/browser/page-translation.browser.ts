@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import pageTranslationCss from '../../entrypoints/page-translation.css?raw';
 import contentTypesFixture from '../../lib/page-translation/fixtures/content-types.html?raw';
@@ -8,6 +8,58 @@ import fixtureCss from './page-translation-fixture.css?raw';
 let stopTranslation: (() => Promise<void>) | undefined;
 
 describe('page translation browser fixture', () => {
+  it.each([
+    'bilingual',
+    'translation',
+    'original',
+  ] as const)('updates existing paragraphs and table cells in %s mode', async (displayMode) => {
+    appendStyle(pageTranslationCss);
+    document.body.innerHTML =
+      '<main><p>Old paragraph.</p><table><tbody><tr><td>Old cell.</td></tr></tbody></table></main>';
+    const requests: string[][] = [];
+    const session = createPageTranslation({
+      document,
+      async translate(units) {
+        requests.push(units.map((unit) => unit.text));
+        return units.map((unit) => ({
+          ...unit,
+          text: `Translated: ${unit.text}`,
+        }));
+      },
+    });
+    stopTranslation = () => session.stop();
+    await session.start({ targetLanguage: 'zh-CN', displayMode });
+    const paragraph = requiredElement('p');
+    const cell = requiredElement('td');
+    if (!paragraph.firstChild || !cell.firstChild)
+      throw new Error('Missing text nodes.');
+    paragraph.firstChild.textContent = 'New paragraph.';
+    cell.firstChild.textContent = 'New cell.';
+    await vi.waitFor(() => {
+      expect(requiredElement('p[data-lingo-translation]').textContent).toBe(
+        'Translated: New paragraph.',
+      );
+      expect(requiredElement('td [data-lingo-translation]').textContent).toBe(
+        'Translated: New cell.',
+      );
+    });
+    expect(requests).toEqual([
+      ['Old paragraph.', 'Old cell.'],
+      ['New paragraph.', 'New cell.'],
+    ]);
+    expect(session.snapshot()).toMatchObject({
+      translatedUnitCount: 2,
+      totalUnitCount: 2,
+    });
+    expect(
+      requiredElement<HTMLElement>('p[data-lingo-translation]').hidden,
+    ).toBe(displayMode === 'original');
+    await session.stop();
+    expect(paragraph.textContent).toBe('New paragraph.');
+    expect(cell.textContent).toBe('New cell.');
+    expect(document.querySelector('[data-lingo-translation]')).toBeNull();
+  });
+
   afterEach(async () => {
     await stopTranslation?.();
     stopTranslation = undefined;
@@ -68,6 +120,13 @@ describe('page translation browser fixture', () => {
     expect(translatedTexts).not.toContain(
       'This protected paragraph must not be translated.',
     );
+    for (const sentinel of [
+      'private-inline-sentinel',
+      'private-code-sentinel',
+      'private-hidden-sentinel',
+    ]) {
+      expect(translatedTexts.join('\n')).not.toContain(sentinel);
+    }
 
     await pageTranslation.update({ displayMode: 'translation' });
     expect(firstCell.hasAttribute('data-lingo-cell-original-hidden')).toBe(

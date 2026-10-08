@@ -61,6 +61,7 @@ type TranslationClient = (
 type PageTranslationDependencies = {
   document: Document;
   translate: TranslationClient;
+  cancel?: () => void;
   logger?: Logger;
 };
 
@@ -124,13 +125,14 @@ const INLINE_TAGS = new Set([
 export function createPageTranslation({
   document,
   translate,
+  cancel,
   logger,
 }: PageTranslationDependencies): PageTranslation {
   const listeners = new Set<(event: PageTranslationEvent) => void>();
   const unitIds = new WeakMap<HTMLElement, string>();
   const unitNumbers = new WeakMap<HTMLElement, number>();
-  let processed = new WeakSet<HTMLElement>();
-  let knownCandidates = new WeakSet<HTMLElement>();
+  const processed = new Map<HTMLElement, Candidate>();
+  const knownCandidates = new Set<HTMLElement>();
   const insertedTranslations = new Map<HTMLElement, HTMLElement>();
   const failedElements = new Set<HTMLElement>();
   const pausedVisibleElements = new Set<HTMLElement>();
@@ -178,6 +180,50 @@ export function createPageTranslation({
     insertedTranslations.clear();
   }
 
+  function removeTranslation(original: HTMLElement) {
+    insertedTranslations.get(original)?.remove();
+    insertedTranslations.delete(original);
+    original.removeAttribute(HIDDEN_ATTRIBUTE);
+    original.removeAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE);
+  }
+
+  function refreshChangedContent() {
+    for (const element of knownCandidates) {
+      const candidate = processed.get(element);
+      const detached = !element.isConnected;
+      if (
+        !detached &&
+        (!candidate ||
+          encodeInlineContent(element).text === candidate.encodedText)
+      ) {
+        continue;
+      }
+      processed.delete(element);
+      failedElements.delete(element);
+      removeTranslation(element);
+      if (detached) {
+        knownCandidates.delete(element);
+        pending.delete(element);
+        pausedVisibleElements.delete(element);
+        intersectionObserver?.unobserve(element);
+      }
+    }
+    publish({
+      ...current,
+      translatedUnitCount: insertedTranslations.size,
+      failedUnitCount: failedElements.size,
+      totalUnitCount: knownCandidates.size,
+    });
+  }
+
+  function isCurrentCandidate(candidate: Candidate) {
+    return (
+      processed.get(candidate.element) === candidate &&
+      candidate.element.isConnected &&
+      encodeInlineContent(candidate.element).text === candidate.encodedText
+    );
+  }
+
   async function translateElements(elements: HTMLElement[]) {
     const options = activeOptions;
     if (!options) return;
@@ -188,7 +234,10 @@ export function createPageTranslation({
     const revision = current.pageRevision;
     const token = sessionToken;
     const fresh = elements.filter(
-      (element) => !processed.has(element) && element.isConnected,
+      (element) =>
+        !processed.has(element) &&
+        element.isConnected &&
+        canTranslateContent(element),
     );
     registerCandidates(fresh);
     const candidates = fresh.map(createCandidate);
@@ -199,7 +248,7 @@ export function createPageTranslation({
       return;
     }
     for (const candidate of candidates) {
-      processed.add(candidate.element);
+      processed.set(candidate.element, candidate);
       pending.delete(candidate.element);
       intersectionObserver?.unobserve(candidate.element);
     }
@@ -234,7 +283,10 @@ export function createPageTranslation({
         category: errorCategory(error),
         error,
       });
-      for (const candidate of candidates) failedElements.add(candidate.element);
+      const currentCandidates = candidates.filter(isCurrentCandidate);
+      if (currentCandidates.length === 0) return;
+      for (const candidate of currentCandidates)
+        failedElements.add(candidate.element);
       publish({
         ...current,
         status: 'failed',
@@ -257,14 +309,21 @@ export function createPageTranslation({
       return;
     }
     const byId = new Map(translations.map((unit) => [unit.id, unit.text]));
+    if (!candidates.some(isCurrentCandidate)) return;
     let inserted = 0;
     for (const candidate of candidates) {
+      if (!isCurrentCandidate(candidate)) continue;
       const text = byId.get(candidate.id);
       if (text === undefined) {
         failedElements.add(candidate.element);
         continue;
       }
-      if (!candidate.element.isConnected) continue;
+      if (
+        !candidate.element.isConnected ||
+        !canTranslateContent(candidate.element)
+      ) {
+        continue;
+      }
       const tableCell = isTableCell(candidate.element);
       const translation = tableCell
         ? document.createElement('div')
@@ -311,7 +370,7 @@ export function createPageTranslation({
       status: failures.some((failure) => isBlockingCategory(failure.category))
         ? 'failed'
         : 'translated',
-      translatedUnitCount: current.translatedUnitCount + inserted,
+      translatedUnitCount: insertedTranslations.size,
       failedUnitCount: failedElements.size,
       failure:
         failures[0] ??
@@ -378,12 +437,13 @@ export function createPageTranslation({
   function handleNavigation() {
     if (!activeOptions) return;
     sessionToken += 1;
+    cancel?.();
     removeTranslations();
     pending.clear();
     failedElements.clear();
     pausedVisibleElements.clear();
-    processed = new WeakSet<HTMLElement>();
-    knownCandidates = new WeakSet<HTMLElement>();
+    processed.clear();
+    knownCandidates.clear();
     publish({
       ...current,
       status: 'translating',
@@ -396,12 +456,29 @@ export function createPageTranslation({
   }
 
   function observePage() {
-    observer = new MutationObserver(() => {
+    observer = new MutationObserver((records) => {
+      const changesSource = records.some((record) => {
+        const target =
+          record.target instanceof Element
+            ? record.target
+            : record.target.parentElement;
+        if (target?.closest(`[${TRANSLATION_ATTRIBUTE}]`)) return false;
+        if (record.type === 'characterData') return true;
+        return [...record.addedNodes, ...record.removedNodes].some(
+          (node) =>
+            !(
+              node instanceof Element &&
+              node.hasAttribute(TRANSLATION_ATTRIBUTE)
+            ),
+        );
+      });
+      if (!changesSource) return;
       if (mutationScheduled || !activeOptions) return;
       mutationScheduled = true;
       queueMicrotask(() => {
         mutationScheduled = false;
         if (activeOptions) {
+          refreshChangedContent();
           schedule(
             findCandidates(document, activeOptions.contentScope ?? 'main'),
           );
@@ -410,6 +487,7 @@ export function createPageTranslation({
     });
     observer.observe(document.documentElement, {
       childList: true,
+      characterData: true,
       subtree: true,
     });
     if (typeof IntersectionObserver !== 'undefined') {
@@ -511,6 +589,7 @@ export function createPageTranslation({
     async stop() {
       sessionToken += 1;
       activeOptions = undefined;
+      cancel?.();
       observer?.disconnect();
       intersectionObserver?.disconnect();
       observer = undefined;
@@ -522,8 +601,8 @@ export function createPageTranslation({
       pending.clear();
       failedElements.clear();
       pausedVisibleElements.clear();
-      processed = new WeakSet<HTMLElement>();
-      knownCandidates = new WeakSet<HTMLElement>();
+      processed.clear();
+      knownCandidates.clear();
       publish({
         status: 'idle',
         displayMode: 'bilingual',
@@ -573,13 +652,23 @@ function findCandidates(
   ].filter(
     (element) =>
       !element.closest(`[${TRANSLATION_ATTRIBUTE}]`) &&
-      !element.closest(PROTECTED_SELECTOR) &&
+      canTranslateContent(element) &&
       (scope === 'main-and-interface' ||
         !element.closest(INTERFACE_SELECTOR)) &&
       (!isTableCell(element) ||
         !element.querySelector(CONTENT_CANDIDATE_SELECTOR)) &&
-      isVisible(element) &&
       isContentCandidate(element, scope),
+  );
+}
+
+function canTranslateContent(element: HTMLElement): boolean {
+  // A paragraph is sent as one unit. Keep mixed protected/public paragraphs
+  // intact so textContent cannot carry private descendants into the request.
+  return (
+    !element.closest(PROTECTED_SELECTOR) &&
+    !element.querySelector(PROTECTED_SELECTOR) &&
+    isVisible(element) &&
+    [...element.querySelectorAll<HTMLElement>('*')].every(isVisible)
   );
 }
 
@@ -632,8 +721,10 @@ function encodeInlineContent(element: HTMLElement): {
   const inlineElements = new Map<string, HTMLElement>();
   function encode(node: Node): string {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+    if (node instanceof Element && node.hasAttribute(TRANSLATION_ATTRIBUTE))
+      return '';
     if (!(node instanceof HTMLElement) || !INLINE_TAGS.has(node.tagName)) {
-      return node.textContent ?? '';
+      return [...node.childNodes].map(encode).join('');
     }
     const marker = String(nextMarker++);
     inlineElements.set(marker, node);

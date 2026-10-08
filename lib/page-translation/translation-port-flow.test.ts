@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createTranslationPortClient,
   serveTranslationPort,
@@ -15,6 +15,127 @@ import {
 import { createPageTranslation } from './page-translation';
 
 describe('translation port flow', () => {
+  it('uses saved source language for provider requests across the port', async () => {
+    const [contentPort, backgroundPort] = createPortPair([]);
+    const provider = createInMemoryProvider();
+    const translateBatch = vi.fn(provider.translateBatch);
+    serveTranslationPort(
+      backgroundPort,
+      createTranslationOrchestrator(
+        { ...provider, translateBatch },
+        {
+          sourceLanguage: async () => 'ja',
+        },
+      ),
+      (error) => {
+        throw error;
+      },
+    );
+    const client = createTranslationPortClient(() => contentPort);
+    await client.translate(
+      [{ id: '1', number: 1, text: 'こんにちは' }],
+      'zh-CN',
+    );
+    expect(translateBatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceLanguage: 'ja',
+        targetLanguage: 'zh-CN',
+      }),
+    );
+    client.disconnect();
+  });
+
+  it('stops queued batches, aborts the pending request, and can start again', async () => {
+    document.body.innerHTML = '<main><p>First.</p><p>Second.</p></main>';
+    const provider = createInMemoryProvider();
+    let signal: AbortSignal | undefined;
+    const translateBatch = vi
+      .fn<TranslationProvider['translateBatch']>()
+      .mockImplementationOnce((input) => {
+        signal = input.signal;
+        return new Promise(() => {});
+      })
+      .mockImplementation(provider.translateBatch);
+    const orchestrator = createTranslationOrchestrator(
+      {
+        ...provider,
+        capabilities: { ...provider.capabilities, maxBatchSize: 1 },
+        translateBatch,
+      },
+      { maxConcurrentBatches: 1 },
+    );
+    const onError = vi.fn();
+    const connect = vi.fn(() => {
+      const [contentPort, backgroundPort] = createPortPair([]);
+      serveTranslationPort(backgroundPort, orchestrator, onError);
+      return contentPort;
+    });
+    const client = createTranslationPortClient(connect);
+    const session = createPageTranslation({
+      document,
+      translate: client.translate,
+      cancel: client.cancel,
+    });
+    const options = {
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual' as const,
+    };
+    const started = session.start(options);
+    await vi.waitFor(() => expect(translateBatch).toHaveBeenCalledTimes(1));
+
+    await session.stop();
+    await started;
+    expect(signal?.aborted).toBe(true);
+    expect(session.snapshot().status).toBe('idle');
+    expect(document.querySelector('[data-lingo-translation]')).toBeNull();
+    expect(translateBatch).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+
+    await session.start(options);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(session.snapshot().translatedUnitCount).toBe(2);
+    await session.stop();
+    client.disconnect();
+  });
+
+  it('keeps primary results while completing an explicitly configured fallback', async () => {
+    const [contentPort, backgroundPort] = createPortPair([]);
+    const fallback = createInMemoryProvider();
+    const primary: TranslationProvider = {
+      capabilities: { ...fallback.capabilities, maxBatchSize: 1 },
+      async translateBatch({ units }) {
+        if (units[0].id === 'paragraph-2') {
+          throw Object.assign(new Error('Primary quota exhausted.'), {
+            category: 'quota',
+          });
+        }
+        return units.map((unit) => ({ ...unit, text: 'Primary translation.' }));
+      },
+    };
+    serveTranslationPort(
+      backgroundPort,
+      createTranslationOrchestrator(primary, { fallbackProviders: [fallback] }),
+      (error) => {
+        throw error;
+      },
+    );
+    const client = createTranslationPortClient(() => contentPort);
+
+    await expect(
+      client.translate(
+        [
+          { id: 'paragraph-1', number: 1, text: 'First paragraph.' },
+          { id: 'paragraph-2', number: 2, text: 'Second paragraph.' },
+        ],
+        'zh-CN',
+      ),
+    ).resolves.toEqual([
+      { id: 'paragraph-1', number: 1, text: 'Primary translation.' },
+      { id: 'paragraph-2', number: 2, text: '[zh-CN] Second paragraph.' },
+    ]);
+    client.disconnect();
+  });
+
   it('translates and restores a static article through the long-lived port', async () => {
     document.body.innerHTML = '<article><p>Hello over the port.</p></article>';
     const observedMessages: unknown[] = [];

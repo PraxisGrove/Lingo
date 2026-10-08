@@ -17,6 +17,7 @@ export default defineContentScript({
     const pageTranslation = createPageTranslation({
       document,
       translate: client.translate,
+      cancel: client.cancel,
       logger,
     });
     const floatingControl = createFloatingPageControl({

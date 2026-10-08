@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createTranslationPortClient,
   isTranslationPortRequest,
@@ -8,6 +8,57 @@ import {
 } from './translation-port';
 
 describe('translation port protocol', () => {
+  it('cancels a pending request after automatic reconnection without reconnecting again', async () => {
+    const ports: Array<{
+      port: TranslationRuntimePort;
+      messages: Set<(message: unknown) => void>;
+      disconnects: Set<() => void>;
+    }> = [];
+    const connect = vi.fn(() => {
+      const messages = new Set<(message: unknown) => void>();
+      const disconnects = new Set<() => void>();
+      const port: TranslationRuntimePort = {
+        name: TRANSLATION_PORT_NAME,
+        onMessage: {
+          addListener: (listener) => messages.add(listener),
+          removeListener: (listener) => messages.delete(listener),
+        },
+        onDisconnect: {
+          addListener: (listener) => disconnects.add(listener),
+          removeListener: (listener) => disconnects.delete(listener),
+        },
+        postMessage() {},
+        disconnect() {
+          for (const listener of [...disconnects]) listener();
+        },
+      };
+      ports.push({ port, messages, disconnects });
+      return port;
+    });
+    const client = createTranslationPortClient(
+      connect,
+      () => 'session',
+      () => undefined,
+    );
+    const pending = client.translate(
+      [{ id: '1', number: 1, text: 'Hello.' }],
+      'zh-CN',
+    );
+    const cancelled = expect(pending).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    ports[0].port.disconnect();
+    expect(connect).toHaveBeenCalledTimes(2);
+
+    client.cancel();
+    await cancelled;
+    expect(connect).toHaveBeenCalledTimes(2);
+    for (const port of ports) {
+      expect(port.messages.size).toBe(0);
+      expect(port.disconnects.size).toBe(0);
+    }
+  });
+
   it('requires a stable paragraph number for every translation unit', () => {
     expect(
       isTranslationPortRequest({
@@ -86,6 +137,49 @@ describe('translation port protocol', () => {
         event: { type: 'translated', sessionId: 'session-1' },
       }),
     ).toBe(false);
+  });
+
+  it('rejects connection errors as a promise', async () => {
+    const client = createTranslationPortClient(() => {
+      throw new Error('Extension context invalidated.');
+    });
+
+    await expect(client.translate([], 'zh-CN')).rejects.toThrow(
+      'Extension context invalidated.',
+    );
+  });
+
+  it('cleans up a failed send and opens a fresh port for the next request', async () => {
+    const messageListeners = new Set<(message: unknown) => void>();
+    const disconnectListeners = new Set<() => void>();
+    const brokenPort: TranslationRuntimePort = {
+      name: TRANSLATION_PORT_NAME,
+      onMessage: {
+        addListener: (listener) => messageListeners.add(listener),
+        removeListener: (listener) => messageListeners.delete(listener),
+      },
+      onDisconnect: {
+        addListener: (listener) => disconnectListeners.add(listener),
+        removeListener: (listener) => disconnectListeners.delete(listener),
+      },
+      postMessage() {
+        throw new Error('Attempting to use a disconnected port.');
+      },
+      disconnect() {},
+    };
+    const connect = vi
+      .fn()
+      .mockReturnValueOnce(brokenPort)
+      .mockReturnValue(createCompletedPort());
+    const client = createTranslationPortClient(connect);
+
+    await expect(client.translate([], 'zh-CN')).rejects.toThrow(
+      'Attempting to use a disconnected port.',
+    );
+    expect(messageListeners.size).toBe(0);
+    expect(disconnectListeners.size).toBe(0);
+    await expect(client.translate([], 'zh-CN')).resolves.toEqual([]);
+    expect(connect).toHaveBeenCalledTimes(2);
   });
 
   it('rejects a pending translation and reconnects for the next request', async () => {

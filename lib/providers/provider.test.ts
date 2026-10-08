@@ -74,8 +74,10 @@ describe.each(cases)('$profile.provider provider contract', ({
         new Response(JSON.stringify(response), { status: 200 }),
       );
     const provider = createProvider(profile, 'secret', fetch);
+    const signal = new AbortController().signal;
     await expect(
       provider.translateBatch({
+        signal,
         sourceLanguage: 'auto',
         targetLanguage: 'es',
         quality: resolveTranslationQuality(),
@@ -85,6 +87,7 @@ describe.each(cases)('$profile.provider provider contract', ({
     expect(new URL(String(fetch.mock.calls[0]?.[0])).pathname).toBe(
       expectedPath,
     );
+    expect(fetch.mock.calls[0]?.[1]?.signal).toBe(signal);
   });
 });
 

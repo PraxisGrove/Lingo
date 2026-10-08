@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '../logger/logger';
+import type { TranslationUnit } from '../translation/types';
 import {
   createPageTranslation as createPageTranslationImplementation,
   type PageTranslation,
@@ -26,6 +27,92 @@ const createPageTranslation: typeof createPageTranslationImplementation = (
 };
 
 describe('PageTranslation', () => {
+  it.each([
+    'bilingual',
+    'translation',
+    'original',
+  ] as const)('refreshes changed text and table cells in %s display without duplicating requests', async (displayMode) => {
+    document.body.innerHTML =
+      '<main><p>First.</p><table><tbody><tr><td>Cell.</td></tr></tbody></table></main>';
+    const translate = vi.fn(async (units: TranslationUnit[]) =>
+      units.map((unit) => ({
+        ...unit,
+        text: `Translated: ${unit.text}`,
+      })),
+    );
+    const session = createPageTranslation({ document, translate });
+    await session.start({ targetLanguage: 'zh-CN', displayMode });
+    const paragraph = document.querySelector('p');
+    const cell = document.querySelector('td');
+    if (!paragraph?.firstChild || !cell?.firstChild)
+      throw new Error('Missing source nodes.');
+    paragraph.firstChild.textContent = 'Updated paragraph.';
+    cell.firstChild.textContent = 'Updated cell.';
+
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector('p[data-lingo-translation]')?.textContent,
+      ).toBe('Translated: Updated paragraph.');
+      expect(cell.querySelector('[data-lingo-translation]')?.textContent).toBe(
+        'Translated: Updated cell.',
+      );
+    });
+    expect(translate).toHaveBeenCalledTimes(2);
+    expect(session.snapshot()).toMatchObject({
+      translatedUnitCount: 2,
+      totalUnitCount: 2,
+    });
+    await session.stop();
+    expect(paragraph.textContent).toBe('Updated paragraph.');
+    expect(cell.textContent).toBe('Updated cell.');
+    expect(document.querySelector('[data-lingo-translation]')).toBeNull();
+  });
+
+  it('discards late results for an older version of the same paragraph', async () => {
+    document.body.innerHTML = '<main><p>Old content.</p></main>';
+    const releases: Array<() => void> = [];
+    const session = createPageTranslation({
+      document,
+      translate: (units) =>
+        new Promise((resolve) => {
+          releases.push(() =>
+            resolve(
+              units.map((unit) => ({
+                ...unit,
+                text: `Translated: ${unit.text}`,
+              })),
+            ),
+          );
+        }),
+    });
+    const started = session.start({
+      targetLanguage: 'zh-CN',
+      displayMode: 'bilingual',
+    });
+    const paragraph = document.querySelector('p');
+    if (!paragraph) throw new Error('Missing source paragraph.');
+    paragraph.textContent = 'New content.';
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    releases[1]();
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector('[data-lingo-translation]')?.textContent,
+      ).toBe('Translated: New content.'),
+    );
+    releases[0]();
+    await started;
+    expect(document.querySelectorAll('[data-lingo-translation]')).toHaveLength(
+      1,
+    );
+    expect(
+      document.querySelector('[data-lingo-translation]')?.textContent,
+    ).toBe('Translated: New content.');
+    expect(session.snapshot()).toMatchObject({
+      translatedUnitCount: 1,
+      totalUnitCount: 1,
+    });
+  });
+
   beforeEach(() => {
     document.head.innerHTML = '';
     document.body.innerHTML = `
@@ -499,6 +586,72 @@ describe('PageTranslation', () => {
       'A sufficiently substantial main article paragraph for reading.',
       'Explicit interface copy',
     ]);
+  });
+
+  it('keeps paragraphs containing protected descendants out of requests', async () => {
+    document.body.innerHTML = `
+      <main>
+        <p>Public text with <span translate="no">private phrase</span>.</p>
+        <p>Example <code>secret_token</code>.</p>
+        <p>Public text with <span contenteditable="true">draft</span>.</p>
+        <p>Public text with <span hidden>hidden secret</span>.</p>
+        <p>Public text with <span style="display: none">CSS secret</span>.</p>
+        <blockquote><p>Public text with <span class="payment">card details</span>.</p></blockquote>
+        <p>Ordinary public paragraph.</p>
+      </main>
+    `;
+    const originalMarkup = document.body.innerHTML;
+    const texts: string[] = [];
+    const session = createPageTranslation({
+      document,
+      async translate(units) {
+        texts.push(...units.map((unit) => unit.text));
+        return units;
+      },
+    });
+
+    await session.start({ targetLanguage: 'zh-CN', displayMode: 'bilingual' });
+
+    expect(texts).toEqual(['Ordinary public paragraph.']);
+    await session.stop();
+    expect(document.body.innerHTML).toBe(originalMarkup);
+  });
+
+  it('rechecks protection when a queued paragraph enters the viewport', async () => {
+    let callback: IntersectionObserverCallback = () => undefined;
+    class ControlledIntersectionObserver {
+      constructor(next: IntersectionObserverCallback) {
+        callback = next;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('IntersectionObserver', ControlledIntersectionObserver);
+    const translate = vi.fn(async (units) => units);
+    const session = createPageTranslation({ document, translate });
+    try {
+      await session.start({
+        targetLanguage: 'zh-CN',
+        displayMode: 'bilingual',
+        translateImmediately: false,
+      });
+      const paragraph = document.querySelector('p');
+      paragraph?.setAttribute('translate', 'no');
+      callback(
+        [
+          {
+            target: paragraph,
+            isIntersecting: true,
+          } as unknown as IntersectionObserverEntry,
+        ],
+        {} as IntersectionObserver,
+      );
+      await Promise.resolve();
+      expect(translate).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('preserves links and emphasis in translated output', async () => {

@@ -163,6 +163,7 @@ export type TranslationPortClient = {
     units: TranslationUnit[],
     targetLanguage: string,
   ): Promise<TranslationClientResult>;
+  cancel(): void;
   disconnect(): void;
 };
 
@@ -193,6 +194,14 @@ export function createTranslationPortClient(
 ): TranslationPortClient {
   let port: TranslationRuntimePort | undefined;
   let closed = false;
+  const pendingCancellations = new Set<() => void>();
+
+  const cancelPending = () => {
+    for (const cancel of [...pendingCancellations]) cancel();
+    const activePort = port;
+    port = undefined;
+    activePort?.disconnect();
+  };
 
   const ensurePort = () => {
     if (port) return port;
@@ -201,7 +210,7 @@ export function createTranslationPortClient(
   };
 
   return {
-    translate(units, targetLanguage) {
+    async translate(units, targetLanguage) {
       if (closed) {
         return Promise.reject(
           disconnectError('The translation client was closed.'),
@@ -217,8 +226,14 @@ export function createTranslationPortClient(
         let listenerPort = activePort;
 
         const cleanup = () => {
+          pendingCancellations.delete(cancelRequest);
           listenerPort.onMessage.removeListener(onMessage);
           listenerPort.onDisconnect.removeListener(onDisconnect);
+        };
+
+        const cancelRequest = () => {
+          cleanup();
+          reject(new DOMException('Translation cancelled.', 'AbortError'));
         };
 
         const onDisconnect = () => {
@@ -270,38 +285,43 @@ export function createTranslationPortClient(
               category: event.category,
               message: event.message,
             });
-          } else if (event.type === 'paused') {
-            cleanup();
-            reject(new Error(event.reason));
           }
+          // A pause can announce an explicit fallback. Only completion or
+          // disconnection ends the request; keep listening for its results.
         };
 
         const start = (requestPort: TranslationRuntimePort) => {
           listenerPort = requestPort;
-          requestPort.onMessage.addListener(onMessage);
-          requestPort.onDisconnect.addListener(onDisconnect);
-          requestPort.postMessage({
-            type: 'translate',
-            request: {
-              sessionId,
-              pageRevision: 0,
-              sourceLanguage: 'auto',
-              targetLanguage,
-              pageTitle: getPageTitle(),
-              siteHostname: getSiteHostname(),
-              units,
-            },
-          } satisfies TranslationPortRequest);
+          pendingCancellations.add(cancelRequest);
+          try {
+            requestPort.onMessage.addListener(onMessage);
+            requestPort.onDisconnect.addListener(onDisconnect);
+            requestPort.postMessage({
+              type: 'translate',
+              request: {
+                sessionId,
+                pageRevision: 0,
+                sourceLanguage: 'auto',
+                targetLanguage,
+                pageTitle: getPageTitle(),
+                siteHostname: getSiteHostname(),
+                units,
+              },
+            } satisfies TranslationPortRequest);
+          } catch (error) {
+            if (port === requestPort) port = undefined;
+            cleanup();
+            throw error;
+          }
         };
 
         start(activePort);
       });
     },
+    cancel: cancelPending,
     disconnect() {
       closed = true;
-      const activePort = port;
-      port = undefined;
-      activePort?.disconnect();
+      cancelPending();
     },
   };
 }
@@ -325,7 +345,9 @@ export function serveTranslationPort(
   onError: (error: unknown) => void,
 ): void {
   const activeSessions = new Set<string>();
+  let disconnected = false;
   port.onDisconnect.addListener(() => {
+    disconnected = true;
     for (const sessionId of activeSessions) {
       void orchestrator.cancel(sessionId);
     }
@@ -333,12 +355,13 @@ export function serveTranslationPort(
   });
 
   port.onMessage.addListener((message) => {
-    if (!isTranslationPortRequest(message)) return;
+    if (disconnected || !isTranslationPortRequest(message)) return;
     activeSessions.add(message.request.sessionId);
 
     void (async () => {
       try {
         for await (const event of orchestrator.translate(message.request)) {
+          if (disconnected) return;
           port.postMessage({
             type: 'translation-event',
             event,
@@ -348,6 +371,7 @@ export function serveTranslationPort(
         activeSessions.delete(message.request.sessionId);
       }
     })().catch((error) => {
+      if (disconnected) return;
       onError(error);
       for (const unit of message.request.units) {
         port.postMessage({

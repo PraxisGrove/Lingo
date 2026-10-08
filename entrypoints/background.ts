@@ -35,6 +35,7 @@ export default defineBackground(() => {
   const translationLogger = createLogger('translation');
   const translationCache = createTranslationCache();
   const orchestrator = createTranslationOrchestrator(getActiveProviderChain, {
+    sourceLanguage: async () => (await getSettings()).sourceLanguage,
     cache: createConditionalTranslationCache(
       translationCache,
       async () => (await getSettings()).translationCacheEnabled,

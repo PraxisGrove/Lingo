@@ -97,7 +97,8 @@ async function translate(
   let response: Response;
   try {
     response = await fetcher(request.url, request.init);
-  } catch {
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
     throw new ProviderError(
       'network',
       'The translation service could not be reached.',
@@ -179,7 +180,15 @@ function buildRequest(
         headers['ocp-apim-subscription-region'] = profile.region;
       body = input.units.map((unit) => ({ text: unit.text }));
   }
-  return { url, init: { method: 'POST', headers, body: JSON.stringify(body) } };
+  return {
+    url,
+    init: {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: input.signal,
+    },
+  };
 }
 
 function parseResponse(
@@ -221,7 +230,9 @@ function parseResponse(
 
 function structuredInstruction(input: ProviderBatchInput): string {
   const parts = [
-    `Translate to ${input.targetLanguage}.`,
+    input.sourceLanguage === 'auto'
+      ? `Translate to ${input.targetLanguage}.`
+      : `Translate from ${input.sourceLanguage} to ${input.targetLanguage}.`,
     instructionForQuality(input.quality),
     'Return a JSON object with a translations array. Each item must contain the supplied stable id and its translated text.',
   ];

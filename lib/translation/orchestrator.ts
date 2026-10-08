@@ -9,6 +9,7 @@ import type {
 } from './types';
 
 export type ProviderBatchInput = {
+  signal?: AbortSignal;
   sourceLanguage: string;
   targetLanguage: string;
   units: TranslationUnit[];
@@ -39,6 +40,7 @@ export type TranslationProvider = {
 };
 
 export type TranslationOrchestratorOptions = {
+  sourceLanguage?: () => Promise<string>;
   cache?: TranslationCache;
   fallbackProviders?: TranslationProvider[];
   maxConcurrentBatches?: number;
@@ -55,7 +57,7 @@ export function createTranslationOrchestrator(
   provider: TranslationProvider | TranslationProviderResolver,
   options: TranslationOrchestratorOptions = {},
 ): TranslationOrchestrator {
-  const cancelledSessions = new Set<string>();
+  const activeSessions = new Map<string, AbortController>();
   const maxConcurrentBatches = Math.max(1, options.maxConcurrentBatches ?? 2);
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const timeoutMs = Math.max(1, options.timeoutMs ?? 20_000);
@@ -63,72 +65,88 @@ export function createTranslationOrchestrator(
 
   return {
     async *translate(request: TranslationRequest) {
-      cancelledSessions.delete(request.sessionId);
-
-      for (const unit of request.units) {
-        yield eventForUnit(request, unit.id, 'queued');
-      }
-      const quality = options.quality
-        ? await options.quality(request)
-        : resolveTranslationQuality();
-
-      const outcomes = await translateUnits(
-        request,
-        [
-          ...(typeof provider === 'function' ? await provider() : [provider]),
-          ...(options.fallbackProviders ?? []),
-        ],
-        options.cache,
-        quality,
-        maxConcurrentBatches,
-        maxAttempts,
-        timeoutMs,
-        wait,
-        () => cancelledSessions.has(request.sessionId),
-        options.logger,
-      );
-
-      for (const outcome of outcomes) {
-        if (cancelledSessions.has(request.sessionId)) return;
-        if (outcome.type === 'paused') {
-          yield {
-            ...outcome,
-            sessionId: request.sessionId,
-            pageRevision: request.pageRevision,
-          };
-        } else if (outcome.type === 'translated') {
-          yield {
-            ...eventForUnit(request, outcome.unitId, 'translated'),
-            text: outcome.text,
-          };
-        } else {
-          yield {
-            ...eventForUnit(request, outcome.unitId, 'failed'),
-            category: outcome.category,
-            message: outcome.message,
+      const controller = new AbortController();
+      activeSessions.set(request.sessionId, controller);
+      try {
+        if (options.sourceLanguage) {
+          request = {
+            ...request,
+            sourceLanguage: await options.sourceLanguage(),
           };
         }
-      }
+        if (controller.signal.aborted) return;
 
-      yield {
-        type: 'completed',
-        sessionId: request.sessionId,
-        pageRevision: request.pageRevision,
-        unitId: null,
-      };
-      options.logger?.debug('Translation session completed.', {
-        sessionId: request.sessionId,
-        pageRevision: request.pageRevision,
-        requestedUnitCount: request.units.length,
-        translatedUnitCount: outcomes.filter(
-          (outcome) => outcome.type === 'translated',
-        ).length,
-        failedUnitCount: outcomes.filter((outcome) => outcome.type === 'failed')
-          .length,
-      });
+        for (const unit of request.units) {
+          yield eventForUnit(request, unit.id, 'queued');
+        }
+        const quality = options.quality
+          ? await options.quality(request)
+          : resolveTranslationQuality();
+
+        const outcomes = await translateUnits(
+          request,
+          [
+            ...(typeof provider === 'function' ? await provider() : [provider]),
+            ...(options.fallbackProviders ?? []),
+          ],
+          options.cache,
+          quality,
+          maxConcurrentBatches,
+          maxAttempts,
+          timeoutMs,
+          wait,
+          controller.signal,
+          options.logger,
+        );
+
+        if (controller.signal.aborted) return;
+        for (const outcome of outcomes) {
+          if (controller.signal.aborted) return;
+          if (outcome.type === 'paused') {
+            yield {
+              ...outcome,
+              sessionId: request.sessionId,
+              pageRevision: request.pageRevision,
+            };
+          } else if (outcome.type === 'translated') {
+            yield {
+              ...eventForUnit(request, outcome.unitId, 'translated'),
+              text: outcome.text,
+            };
+          } else {
+            yield {
+              ...eventForUnit(request, outcome.unitId, 'failed'),
+              category: outcome.category,
+              message: outcome.message,
+            };
+          }
+        }
+
+        yield {
+          type: 'completed',
+          sessionId: request.sessionId,
+          pageRevision: request.pageRevision,
+          unitId: null,
+        };
+        options.logger?.debug('Translation session completed.', {
+          sessionId: request.sessionId,
+          pageRevision: request.pageRevision,
+          requestedUnitCount: request.units.length,
+          translatedUnitCount: outcomes.filter(
+            (outcome) => outcome.type === 'translated',
+          ).length,
+          failedUnitCount: outcomes.filter(
+            (outcome) => outcome.type === 'failed',
+          ).length,
+        });
+      } finally {
+        if (activeSessions.get(request.sessionId) === controller) {
+          activeSessions.delete(request.sessionId);
+        }
+      }
     },
     async cancel(sessionId) {
-      cancelledSessions.add(sessionId);
+      activeSessions.get(sessionId)?.abort();
       options.logger?.info('Translation session cancelled.', { sessionId });
     },
   };
@@ -150,13 +168,13 @@ async function translateUnits(
   maxAttempts: number,
   timeoutMs: number,
   wait: (milliseconds: number) => Promise<void>,
-  cancelled: () => boolean,
+  signal: AbortSignal,
   logger?: Logger,
 ): Promise<Outcome[]> {
   const outcomes: Outcome[] = [];
   let pending = request.units;
   for (const [providerIndex, provider] of providers.entries()) {
-    if (cancelled() || pending.length === 0) break;
+    if (signal.aborted || pending.length === 0) break;
     const providerId = provider.id ?? `provider-${providerIndex}`;
     const unresolved: TranslationUnit[] = [];
     for (const unit of pending) {
@@ -189,7 +207,7 @@ async function translateUnits(
             maxAttempts,
             timeoutMs,
             wait,
-            cancelled,
+            signal,
             logger,
             providerIndex,
           );
@@ -228,6 +246,7 @@ async function translateUnits(
           }
           return found;
         } catch (error) {
+          if (signal.aborted) return [];
           const willUseFallback =
             isFallbackError(error) && providerIndex < providers.length - 1;
           if (willUseFallback) {
@@ -312,16 +331,17 @@ async function attemptBatch(
   maxAttempts: number,
   timeoutMs: number,
   wait: (milliseconds: number) => Promise<void>,
-  cancelled: () => boolean,
+  signal: AbortSignal,
   logger?: Logger,
   providerIndex?: number,
 ): Promise<ProviderBatchResult> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    if (cancelled()) throw new Error('Translation cancelled.');
+    signal.throwIfAborted();
     try {
       return await withTimeout(
         provider.translateBatch({
+          signal,
           sourceLanguage: request.sourceLanguage,
           targetLanguage: request.targetLanguage,
           units,
@@ -331,6 +351,7 @@ async function attemptBatch(
             : {}),
         }),
         timeoutMs,
+        signal,
       );
     } catch (error) {
       lastError = error;
@@ -404,19 +425,31 @@ async function mapConcurrent<T, TResult>(
   return results;
 }
 
-function withTimeout<T>(value: Promise<T>, milliseconds: number): Promise<T> {
+function withTimeout<T>(
+  value: Promise<T>,
+  milliseconds: number,
+  signal: AbortSignal,
+): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error('Translation request timed out.')),
-      milliseconds,
-    );
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      reject(new Error('Translation request timed out.'));
+    }, milliseconds);
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
     void value.then(
       (result) => {
         clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
         resolve(result);
       },
       (error: unknown) => {
         clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
         reject(error);
       },
     );
