@@ -1,85 +1,125 @@
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deflateSync } from 'node:zlib';
+import { Resvg } from '@resvg/resvg-js';
+import { createBrandArchive } from './brand-archive.mjs';
 
-const sizes = [16, 32, 48, 96, 128];
-const outputDirectory = fileURLToPath(
+const iconDirectory = fileURLToPath(
   new URL('../public/icon/', import.meta.url),
 );
+const brandDirectory = fileURLToPath(
+  new URL('../public/brand/', import.meta.url),
+);
+const exportDirectory = fileURLToPath(
+  new URL('../docs/brand/assets/', import.meta.url),
+);
+const masterDirectory = fileURLToPath(
+  new URL('../assets/brand/', import.meta.url),
+);
+const symbol = readFileSync(`${masterDirectory}lingo-symbol.svg`, 'utf8');
+const wordmark = readFileSync(`${masterDirectory}lingo-wordmark.svg`, 'utf8');
+const inner = (svg) =>
+  svg
+    .replace(/^\s*<svg[^>]*>/, '')
+    .replace(/<\/svg>\s*$/, '')
+    .trim();
+const ink = '#171A17';
+const lime = '#DFFF45';
+const paper = '#F4F4EF';
+const wrap = (body, fill = ink, viewBox = '0 0 128 128') =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" fill="${fill}" role="img" aria-label="Lingo">${body}</svg>\n`;
+const icon = wrap(
+  `<rect width="128" height="128" rx="28" fill="${ink}"/><g fill="${lime}">${inner(symbol)}</g>`,
+);
+const smallIcon = icon
+  .replaceAll('M54 24', 'M58 24')
+  .replaceAll('H54V24', 'H58V24');
 
-const crcTable = Array.from({ length: 256 }, (_, index) => {
-  let value = index;
-  for (let bit = 0; bit < 8; bit += 1) {
-    value = (value & 1) === 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-  }
-  return value >>> 0;
-});
-
-function crc32(buffer) {
-  let value = 0xffffffff;
-  for (const byte of buffer) {
-    value = crcTable[(value ^ byte) & 0xff] ^ (value >>> 8);
-  }
-  return (value ^ 0xffffffff) >>> 0;
+mkdirSync(iconDirectory, { recursive: true });
+mkdirSync(brandDirectory, { recursive: true });
+mkdirSync(exportDirectory, { recursive: true });
+writeFileSync(`${brandDirectory}lingo-symbol.svg`, symbol);
+writeFileSync(`${brandDirectory}lingo-wordmark.svg`, wordmark);
+writeFileSync(`${iconDirectory}lingo-mark.svg`, icon);
+writeFileSync(`${brandDirectory}lingo-icon.svg`, icon);
+writeFileSync(`${brandDirectory}lingo-symbol-ink.svg`, wrap(inner(symbol)));
+writeFileSync(
+  `${brandDirectory}lingo-symbol-white.svg`,
+  wrap(inner(symbol), paper),
+);
+writeFileSync(
+  `${brandDirectory}lingo-symbol-lime.svg`,
+  wrap(inner(symbol), lime),
+);
+for (const [name, color] of [
+  ['ink', ink],
+  ['white', paper],
+]) {
+  writeFileSync(
+    `${brandDirectory}lingo-wordmark-${name}.svg`,
+    wrap(inner(wordmark), color, '0 0 320 128'),
+  );
+  writeFileSync(
+    `${brandDirectory}lingo-logo-${name}.svg`,
+    wrap(
+      `<g>${inner(symbol)}</g><g transform="translate(148 14) scale(.8)">${inner(wordmark)}</g>`,
+      color,
+      '0 0 412 128',
+    ),
+  );
 }
 
-function chunk(type, data) {
-  const name = Buffer.from(type);
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(data.length);
-  const checksum = Buffer.alloc(4);
-  checksum.writeUInt32BE(crc32(Buffer.concat([name, data])));
-  return Buffer.concat([length, name, data, checksum]);
+const render = (svg, width) =>
+  new Resvg(svg, {
+    fitTo: { mode: 'width', value: width },
+    font: { loadSystemFonts: false },
+  })
+    .render()
+    .asPng();
+for (const size of [16, 32, 48, 96, 128]) {
+  writeFileSync(
+    `${iconDirectory}${size}.png`,
+    render(size === 16 ? smallIcon : icon, size),
+  );
 }
-
-function containsRoundedSquare(x, y, size) {
-  const radius = size * 0.1875;
-  const nearestX = Math.max(radius, Math.min(size - radius, x));
-  const nearestY = Math.max(radius, Math.min(size - radius, y));
-  return (x - nearestX) ** 2 + (y - nearestY) ** 2 <= radius ** 2;
+for (const size of [256, 512, 1024]) {
+  writeFileSync(`${exportDirectory}lingo-icon-${size}.png`, render(icon, size));
 }
-
-function pixelAt(x, y, size) {
-  if (!containsRoundedSquare(x, y, size)) return [0, 0, 0, 0];
-
-  const unitX = (x * 128) / size;
-  const unitY = (y * 128) / size;
-  const inLetter =
-    (unitX >= 31 && unitX < 49 && unitY >= 29 && unitY < 99) ||
-    (unitX >= 31 && unitX < 97 && unitY >= 81 && unitY < 99);
-  const inNotch =
-    unitX >= 78 &&
-    unitX <= 97 &&
-    unitY >= 99 &&
-    unitY <= 116 &&
-    unitX - 78 >= (unitY - 99) * (19 / 17);
-
-  if (inLetter) return [255, 255, 255, 255];
-  if (inNotch) return [23, 32, 42, 255];
-  return [229, 72, 63, 255];
+for (const [name, color] of [
+  ['ink', ink],
+  ['white', paper],
+  ['lime', lime],
+]) {
+  writeFileSync(
+    `${exportDirectory}lingo-symbol-${name}-1024.png`,
+    render(wrap(inner(symbol), color), 1024),
+  );
+  if (name !== 'lime')
+    writeFileSync(
+      `${exportDirectory}lingo-logo-${name}-1600.png`,
+      render(
+        readFileSync(`${brandDirectory}lingo-logo-${name}.svg`, 'utf8'),
+        1600,
+      ),
+    );
 }
-
-function createPng(size) {
-  const rows = [];
-  for (let y = 0; y < size; y += 1) {
-    const row = [0];
-    for (let x = 0; x < size; x += 1) row.push(...pixelAt(x, y, size));
-    rows.push(Buffer.from(row));
-  }
-
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(size, 0);
-  header.writeUInt32BE(size, 4);
-  header.set([8, 6, 0, 0, 0], 8);
-
-  return Buffer.concat([
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    chunk('IHDR', header),
-    chunk('IDAT', deflateSync(Buffer.concat(rows))),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
+const root = fileURLToPath(new URL('../', import.meta.url));
+const files = ['docs/brand/README.md', 'LICENSE'];
+for (const directory of [
+  'assets/brand',
+  'public/brand',
+  'public/icon',
+  'docs/brand/assets',
+]) {
+  files.push(
+    ...readdirSync(`${root}${directory}`)
+      .filter((file) => /\.(svg|png)$/.test(file))
+      .map((file) => `${directory}/${file}`),
+  );
 }
-
-for (const size of sizes) {
-  writeFileSync(`${outputDirectory}${size}.png`, createPng(size));
-}
+writeFileSync(
+  `${exportDirectory}lingo-brand-kit.zip`,
+  createBrandArchive(root, files),
+);
+process.stdout.write(
+  'Lingo icons and brand exports generated from the SVG masters.\n',
+);

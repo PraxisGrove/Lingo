@@ -93,6 +93,14 @@ read-only, and rich-text fields are excluded. The selection button can be turned
 off in settings. Changing the current page target language or service restarts
 that page session while preserving its scope and display mode. Rule publishers can follow [the subscription guide](./docs/rule-subscriptions.md).
 
+## Brand Assets
+
+The Dual Fold identity includes a vector symbol, outlined wordmark, light/dark
+logos, transparent exports, and an optically adjusted toolbar icon. See the
+[brand guide](./docs/brand/README.md), or run `pnpm brand:preview`.
+
+Regenerate icons and exports from their SVG masters with `pnpm icons`.
+
 ## Product Design
 
 - [Domain language](./CONTEXT.md)

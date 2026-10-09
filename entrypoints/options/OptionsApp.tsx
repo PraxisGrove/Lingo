@@ -269,7 +269,10 @@ function OptionsApp() {
   return (
     <main className="options">
       <header>
-        <div className="badge">Lingo</div>
+        <div className="badge">
+          <img src="/icon/lingo-mark.svg" alt="" width="28" height="28" />
+          Lingo
+        </div>
         <h1>
           {settings.setupCompleted
             ? t('options.title.settings')

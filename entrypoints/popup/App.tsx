@@ -187,7 +187,10 @@ function App() {
     <main className="popup" aria-busy={busy}>
       <header className="popup-header">
         <div>
-          <strong className="brand">Lingo</strong>
+          <strong className="brand">
+            <img src="/icon/lingo-mark.svg" alt="" width="26" height="26" />
+            Lingo
+          </strong>
           <span className="hostname" title={hostname || t('popup.currentPage')}>
             {hostname || t('popup.currentPage')}
           </span>

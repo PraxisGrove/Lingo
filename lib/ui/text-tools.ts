@@ -10,6 +10,7 @@ import {
 import type { RuleSelectors } from '../rules/rule-resolver';
 import type { ExtensionSettings } from '../storage/settings-model';
 import { protectLiteralMarkers } from '../translation/inline-markers';
+import { createBrandSymbol } from './brand-symbol';
 import { captureInput, type InputTranslation } from './input-translation';
 
 export type TextAction = 'selection' | 'paragraph' | 'input' | 'open' | 'undo';
@@ -50,7 +51,9 @@ export function createTextTools({
   panel.setAttribute('role', 'region');
   panel.setAttribute('aria-label', t('tools.title'));
   const heading = document.createElement('h2');
-  heading.textContent = t('tools.title');
+  const headingLabel = document.createElement('span');
+  headingLabel.textContent = t('tools.title');
+  heading.append(createBrandSymbol(document), headingLabel);
   const localized: Array<() => void> = [];
   function button(key: MessageKey, click: () => void) {
     const element = document.createElement('button');
@@ -447,7 +450,7 @@ export function createTextTools({
     execute,
     update(settings: ExtensionSettings) {
       for (const refresh of localized) refresh();
-      heading.textContent = t('tools.title');
+      headingLabel.textContent = t('tools.title');
       panel.setAttribute('aria-label', t('tools.title'));
       output.setAttribute('aria-label', t('tools.result'));
       if (label.firstChild) label.firstChild.textContent = t('tools.source');
@@ -507,7 +510,7 @@ const TOOL_CSS = `
   section { position: fixed; z-index: 2147483100; inset: 16px 16px 16px auto; width: min(380px, calc(100vw - 32px)); box-sizing: border-box; padding: 20px; overflow: auto; background: var(--surface); border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 8px 40px #0003; }
   :host([data-standalone]) section { position: relative; inset: auto; width: min(700px, calc(100vw - 32px)); margin: 24px auto; }
   header, .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  header { justify-content: space-between; } h2 { font-size: 18px; }
+  header { justify-content: space-between; } h2 { align-items: center; display: flex; gap: 6px; font-size: 18px; } h2 svg { width: 28px; height: 28px; flex-shrink: 0; }
   label { display: block; margin-block: 12px; }
   textarea, input { display: block; box-sizing: border-box; width: 100%; padding: 10px; margin-top: 6px; border: 1px solid #94a3b8; border-radius: 6px; font: inherit; color: inherit; background: inherit; }
   textarea { resize: vertical; } button { padding: 8px 12px; border: 1px solid #94a3b8; border-radius: 6px; background: var(--button); color: var(--text); font: inherit; cursor: pointer; }

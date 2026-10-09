@@ -104,7 +104,10 @@ button:disabled {
 }
 
 .badge {
-  color: var(--accent);
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  color: var(--text);
   font-size: 13px;
   font-weight: 750;
   width: fit-content;

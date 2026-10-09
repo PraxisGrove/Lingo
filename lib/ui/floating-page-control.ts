@@ -4,6 +4,7 @@ import type {
   SessionSnapshot,
 } from '../page-translation/page-translation';
 import type { ExtensionSettings } from '../storage/settings-model';
+import { createBrandSymbol } from './brand-symbol';
 
 type FloatingPageControlDependencies = {
   document: Document;
@@ -88,7 +89,7 @@ function createControlElement(
   style.textContent = FLOATING_CONTROL_CSS;
   const button = document.createElement('button');
   button.type = 'button';
-  button.textContent = 'L';
+  button.append(createBrandSymbol(document));
   button.title = translate('floating.translate');
   button.setAttribute('aria-label', translate('floating.translate'));
   button.addEventListener('click', () => void onClick());
@@ -119,12 +120,12 @@ const FLOATING_CONTROL_CSS = `
   :host { all: initial; }
   button {
     align-items: center;
-    background: #4f46e5;
+    background: #171a17;
     border: 0;
     border-radius: 50%;
     bottom: 24px;
     box-shadow: 0 4px 8px rgb(0 0 0 / 22%);
-    color: #fff;
+    color: #dfff45;
     cursor: pointer;
     display: flex;
     font: 700 17px/1 system-ui, sans-serif;
@@ -135,18 +136,20 @@ const FLOATING_CONTROL_CSS = `
     width: 44px;
     z-index: 2147483000;
   }
-  button:hover { background: #4338ca; }
+  button:hover { background: #30372d; }
+  button svg { width: 32px; height: 32px; }
   button:focus-visible {
-    outline: 3px solid #a5b4fc;
+    outline: 2px solid #fff;
+    box-shadow: 0 0 0 4px #171a17;
     outline-offset: 3px;
   }
-  button[aria-pressed='true'] { background: #13795b; }
-  button[data-state='failed'] { background: #b42318; }
+  button[aria-pressed='true'] { background: #13795b; color: #fff; }
+  button[data-state='failed'] { background: #b42318; color: #fff; }
   @media (prefers-color-scheme: dark) {
-    button { background: #8b83ff; color: #111218; }
-    button:hover { background: #a59fff; }
-    button[aria-pressed='true'] { background: #5fd0a8; }
-    button[data-state='failed'] { background: #ff8a80; }
+    button { background: #dfff45; color: #171a17; }
+    button:hover { background: #e9ff80; }
+    button[aria-pressed='true'] { background: #5fd0a8; color: #171a17; }
+    button[data-state='failed'] { background: #ff8a80; color: #171a17; }
   }
   @media (max-width: 480px) {
     button { bottom: 16px; right: 16px; }

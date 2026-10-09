@@ -94,6 +94,9 @@ button:disabled {
 }
 
 .brand {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
   font-size: 18px;
   line-height: 1.2;
 }
