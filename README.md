@@ -1,13 +1,17 @@
 # Lingo
 
-Lingo is an open-source bilingual webpage translation extension. It keeps the
-original text in context and sends content only to the translation service the
-reader explicitly configures.
+Lingo is an open-source bilingual reading and translation extension. Read
+webpages, translate selected text, and write across languages while choosing
+your own translation service and keeping control of your data.
 
 The repository includes a working translation workflow built with WXT, React,
 and TypeScript. Webpage content scripts identify paragraphs and present
 translations; the background worker handles configured services, credentials,
 retries, and local caching.
+
+The current release focuses on browser reading and everyday text interactions.
+Document, subtitle, image, and additional platform support are later product
+explorations; they are not prerequisites for this extension stage.
 
 ## Current Capabilities
 
@@ -17,6 +21,7 @@ retries, and local caching.
   and updated paragraphs, partial-failure retries, and original-page restoration.
 - Completed batches appear while remaining requests are still running. Long
   pages are grouped by paragraph count and conservative character budgets.
+  Oversized paragraphs are split and reassembled with inline formatting intact.
 - Saved source-language selection is applied in the background to translation
   requests and cache keys. Stopping a session cancels queued work and aborts
   pending requests; translation can be started again without reloading the page.
@@ -30,6 +35,16 @@ retries, and local caching.
 - Popup controls, settings, keyboard shortcuts, context menus, an optional
   floating control, and localized interfaces.
 - Local translation cache, cache controls, and redacted diagnostic exports.
+- Nested open Shadow DOM, dynamic components, inherited exclusions, and
+  translation styles scoped to each accessible root.
+- Worker-wide concurrency and request-start limits, and shared equivalent
+  in-flight batches with independent cancellation for each reader.
+- Selection translation, explicitly triggered hovered-paragraph translation,
+  a page-side translation panel, and an independent text translation tab.
+- Explicit plain-text input translation with preview, confirmed replacement,
+  undo, and protection against overwriting intervening user edits.
+- Optional signed community-rule subscriptions with an explicitly configured
+  HTTPS address and trusted publisher key; failed updates retain verified rules.
 
 Paragraphs containing protected or hidden content are kept intact and excluded
 from translation requests. Visible inline code is represented by opaque markers,
@@ -40,14 +55,16 @@ before they are sent; invalid marker responses are rejected.
 This is still a development version. History API navigation is handled through
 browser navigation events for the corresponding tab/frame. Installed Chromium
 extension tests cover popup controls, rules, iframe translation, streaming,
-cancellation, SPA navigation, and worker restart against a local HTTP provider.
+cancellation, SPA navigation, text interactions, Shadow DOM, and worker restart
+against a local HTTP provider.
 Chromium and Firefox also run the same local page-layout fixtures.
 
 The fixtures are representative layouts, not a guarantee that every live page
-on those sites is supported. Community rule distribution, real provider account
-validation, Firefox extension installation acceptance, Shadow DOM, and extremely
-long single-paragraph splitting remain work for the roadmap. Local provider
-contracts do not verify translation quality, account limits, or billing.
+on those sites is supported. Real provider account validation, wider live-site
+acceptance, and Firefox extension installation acceptance remain release work.
+Closed shadow roots and rich-text editors are not supported. There is currently
+no official rule subscription endpoint or bundled no-key translation service.
+Local provider contracts do not verify translation quality, account limits, or billing.
 
 ## Try It
 
@@ -57,6 +74,22 @@ contracts do not verify translation quality, account limits, or billing.
    service with your own credentials. Test the connection and save the profile.
 3. Open an ordinary webpage and use the popup or `Alt+Shift+L` to translate.
    Use the popup to change display mode or restore the original page.
+4. Select webpage text and click the translation button, or use the shortcuts
+   below. Open the independent text window from the popup or settings.
+
+| Shortcut | Action |
+| --- | --- |
+| `Alt+Shift+L` | Toggle page translation (browser command) |
+| `Alt+Shift+S` | Translate selected ordinary webpage text |
+| `Alt+Shift+H` | Translate the paragraph under the pointer |
+| `Alt+Shift+I` | Preview translation of the focused plain-text field |
+| `Alt+Shift+T` | Open the page-side text translation panel |
+| `Alt+Shift+U` | Undo the last input replacement, if the field has not changed |
+
+Text shortcuts require focus in the webpage. Selection and input actions are
+also available in the context menu, including inside frames. Password, payment,
+read-only, and rich-text fields are excluded. The selection button can be turned
+off in settings. Rule publishers can follow [the subscription guide](./docs/rule-subscriptions.md).
 
 ## Product Design
 

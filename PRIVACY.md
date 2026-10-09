@@ -1,6 +1,6 @@
 # Lingo Privacy Policy
 
-Last updated: 2026-07-12
+Last updated: 2026-10-09
 
 Lingo is a browser extension for bilingual webpage translation. This policy
 describes the Community extension in this repository. It must be reviewed and
@@ -15,17 +15,30 @@ page title and up to two adjacent paragraph excerpts, each limited to 600
 characters, to improve translation quality. Lingo does not send the full URL,
 the full webpage, or protected content as translation context.
 
+Selected text, explicitly targeted paragraphs, text entered in the independent
+translation window, and explicitly targeted plain-text inputs use the same
+chosen service. Inputs are sent only on an explicit translation action and are
+replaced only after confirmation. Password, payment, read-only and rich-text
+fields are excluded. The extension never scans input values during page translation.
+
+An optional community-rule subscription checks only the reader-configured HTTPS
+address, at most once per day on worker startup, or when explicitly updated in
+settings. The publisher receives an ordinary rule-package request, with no
+cookies, webpage content, or page URL. Rules are verified with the configured
+publisher key; failure retains the last verified package. Updates can be disabled.
+There is no default rule subscription address.
+
 Lingo does not operate an account system and does not collect telemetry.
 Settings, service profiles, credentials, and the translation cache remain in
 the browser profile.
 
-## Planned Translation Data Flow
+## Translation Data Flow
 
 Credentials remain in local extension storage and are not exposed to webpages
 or content scripts. Lingo will not silently send content to a different service.
 
 Password, payment, editor, and `translate="no"` regions are outside normal
-webpage translation. Translation cache entries will remain local and will not
+webpage translation. Translation cache entries remain local and will not
 store full webpage URLs.
 
 ## Collection and Sharing

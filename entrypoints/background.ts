@@ -21,6 +21,7 @@ import {
   saveProviderProfile,
   testProviderProfile,
 } from '@/lib/providers/provider-service';
+import { updateRuleSubscription } from '@/lib/rules/rule-subscription';
 import {
   getSettings,
   initialSettingsForInstall,
@@ -74,6 +75,11 @@ export default defineBackground(() => {
   });
 
   logger.info('Background service worker started.');
+  void updateRuleSubscription().catch((error) =>
+    logger.warn('Community rule check failed; keeping verified rules.', {
+      error,
+    }),
+  );
 
   browser.webNavigation.onHistoryStateUpdated.addListener((details) => {
     void browser.tabs
@@ -130,6 +136,23 @@ export default defineBackground(() => {
 
   browser.contextMenus.onClicked.addListener((info, tab) => {
     if (tab?.id === undefined) return;
+    const textAction = (
+      {
+        'lingo-selection': 'selection',
+        'lingo-input': 'input',
+        'lingo-text': 'open',
+      } as const
+    )[info.menuItemId as 'lingo-selection'];
+    if (textAction) {
+      void browser.tabs
+        .sendMessage(
+          tab.id,
+          createMessage('runTextAction', { action: textAction }),
+          { frameId: info.frameId ?? 0 },
+        )
+        .catch((error) => logger.error('Text action failed.', { error }));
+      return;
+    }
     const item = PAGE_CONTEXT_MENUS.find(
       (candidate) => candidate.id === info.menuItemId,
     );
@@ -143,6 +166,15 @@ export default defineBackground(() => {
     if (!isExtensionMessage(message)) {
       return undefined;
     }
+
+    if (message.type === 'updateCommunityRules')
+      return updateRuleSubscription(message.payload).then((status) => ({
+        status,
+      }));
+    if (message.type === 'openSettings')
+      return browser.runtime
+        .openOptionsPage()
+        .then(() => ({ ok: true as const }));
 
     if (message.type === 'ping') {
       logger.debug('Received ping message.', {
@@ -235,6 +267,21 @@ async function hasHostPermission(): Promise<boolean> {
 
 async function installContextMenus(): Promise<void> {
   await browser.contextMenus.removeAll();
+  browser.contextMenus.create({
+    id: 'lingo-selection',
+    title: translate('tools.menuSelection'),
+    contexts: ['selection'],
+  });
+  browser.contextMenus.create({
+    id: 'lingo-input',
+    title: translate('tools.menuInput'),
+    contexts: ['editable'],
+  });
+  browser.contextMenus.create({
+    id: 'lingo-text',
+    title: translate('tools.menuOpen'),
+    contexts: ['page'],
+  });
   for (const item of localizePageContextMenus(translate)) {
     browser.contextMenus.create({
       id: item.id,

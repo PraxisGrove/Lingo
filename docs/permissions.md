@@ -10,8 +10,9 @@ ordinary exports, diagnostics, and logs.
 ## `contextMenus`
 
 Lingo adds page-level menu commands to translate the current page, translate
-all recognized content, or restore the original page. It does not add selection
-or link menus and does not read menu activity outside these explicit commands.
+all recognized content, or restore the original page. Selection and editable-field
+menus trigger explicit text translation in the corresponding frame. Password
+and payment fields remain excluded. Menu activity outside these commands is not read.
 
 ## `<all_urls>`
 
@@ -24,6 +25,10 @@ Host access is not permission to collect browsing history. When no translation
 session is active, the content script performs only minimal initialization and
 sends no page content. Content is sent only after an applicable user action or
 translation policy and only to the service the reader selected.
+
+Readers can explicitly configure an HTTPS rule subscription and a publisher
+public key. Checks download only a bounded signed rule package, without cookies,
+page text, or page URLs. No official endpoint is preconfigured.
 
 Lingo does not execute remote code. Community site-rule updates are signed,
 schema-validated declarative data.

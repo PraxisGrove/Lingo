@@ -20,6 +20,10 @@ vi.mock('@/lib/messaging/send-message', () => ({
   }),
 }));
 
+vi.mock('@/lib/rules/rule-subscription', () => ({
+  ruleSubscriptionItem: { getValue: async () => null },
+}));
+
 vi.mock('@/lib/rules/community-rules', () => ({
   communityRuleStore: {
     get: async () => ({ updatesEnabled: true }),

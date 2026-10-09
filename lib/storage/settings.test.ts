@@ -74,12 +74,12 @@ describe('resolveSettings', () => {
   });
 
   it.each([
-    1, 2, 3, 4, 5, 6, 7,
+    1, 2, 3, 4, 5, 6, 7, 8,
   ])('migrates schema %s without changing the translation target', (schemaVersion) => {
     expect(
       resolveSettings({ schemaVersion, targetLanguage: 'ja' }),
     ).toMatchObject({
-      schemaVersion: 8,
+      schemaVersion: 9,
       targetLanguage: 'ja',
       uiLocale: 'auto',
     });

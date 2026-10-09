@@ -1,7 +1,9 @@
 import type { TranslationCache } from '../cache/translation-cache';
 import type { Logger } from '../logger/logger';
 import { preservesInlineMarkers } from './inline-markers';
+import { joinLongUnit, splitLongUnit } from './long-text';
 import { resolveTranslationQuality, type TranslationQuality } from './quality';
+import { createRequestControl } from './request-control';
 import type {
   TranslationEvent,
   TranslationOrchestrator,
@@ -46,6 +48,7 @@ export type TranslationOrchestratorOptions = {
   cache?: TranslationCache;
   fallbackProviders?: TranslationProvider[];
   maxConcurrentBatches?: number;
+  minRequestIntervalMs?: number;
   timeoutMs?: number;
   maxAttempts?: number;
   wait?: (milliseconds: number) => Promise<void>;
@@ -60,6 +63,10 @@ export function createTranslationOrchestrator(
   options: TranslationOrchestratorOptions = {},
 ): TranslationOrchestrator {
   const activeSessions = new Map<string, AbortController>();
+  const execute = createRequestControl(
+    Math.max(1, options.maxConcurrentBatches ?? 2),
+    Math.max(0, options.minRequestIntervalMs ?? 125),
+  );
   const maxConcurrentBatches = Math.max(1, options.maxConcurrentBatches ?? 2);
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const timeoutMs = Math.max(1, options.timeoutMs ?? 20_000);
@@ -108,6 +115,7 @@ export function createTranslationOrchestrator(
             wake?.();
           },
           options.logger,
+          execute,
         )
           .then(
             (result) => {
@@ -203,7 +211,8 @@ async function translateUnits(
   wait: (milliseconds: number) => Promise<void>,
   signal: AbortSignal,
   emit: (outcome: Outcome) => void,
-  logger?: Logger,
+  logger: Logger | undefined,
+  execute: ReturnType<typeof createRequestControl>,
 ): Promise<Outcome[]> {
   const outcomes: Outcome[] = [];
   let pending = request.units;
@@ -263,6 +272,7 @@ async function translateUnits(
             signal,
             logger,
             providerIndex,
+            execute,
           );
           const resultsById = validatedResults(units, results);
           if (resultsById.size !== units.length) {
@@ -402,8 +412,9 @@ async function attemptBatch(
   timeoutMs: number,
   wait: (milliseconds: number) => Promise<void>,
   signal: AbortSignal,
-  logger?: Logger,
-  providerIndex?: number,
+  logger: Logger | undefined,
+  providerIndex: number | undefined,
+  execute: ReturnType<typeof createRequestControl>,
 ): Promise<ProviderBatchResult> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -412,22 +423,56 @@ async function attemptBatch(
     const onAbort = () => attemptController.abort(signal.reason);
     signal.addEventListener('abort', onAbort, { once: true });
     try {
-      return await withTimeout(
-        provider.translateBatch({
+      const budget =
+        provider.capabilities.maxBatchCharacters ?? Number.POSITIVE_INFINITY;
+      const pieces = units.map((unit) => splitLongUnit(unit, budget));
+      const allParts = pieces.flatMap((parts) =>
+        parts.map((part) => part.unit),
+      );
+      const batches = split(
+        allParts.filter((part) => part.text.trim()),
+        normalizedBatchSize(provider.capabilities.maxBatchSize),
+        budget,
+      );
+      const found = new Map(
+        allParts
+          .filter((part) => !part.text.trim())
+          .map((part) => [part.id, part.text]),
+      );
+      for (const batch of batches) {
+        const input: ProviderBatchInput = {
           signal: attemptController.signal,
           sourceLanguage: request.sourceLanguage,
           targetLanguage: request.targetLanguage,
-          units,
+          units: batch,
           quality,
           ...(provider.capabilities.supportsContext
             ? { context: contextFor(request, units) }
             : {}),
-        }),
-        timeoutMs,
-        signal,
-        () =>
-          attemptController.abort(new Error('Translation request timed out.')),
-      );
+        };
+        const results = await execute(provider, input, async (sharedSignal) => {
+          const network = new AbortController();
+          const abort = () => network.abort(sharedSignal.reason);
+          sharedSignal.addEventListener('abort', abort, { once: true });
+          try {
+            return await withTimeout(
+              provider.translateBatch({ ...input, signal: network.signal }),
+              timeoutMs,
+              sharedSignal,
+              () => network.abort(new Error('Translation request timed out.')),
+            );
+          } finally {
+            sharedSignal.removeEventListener('abort', abort);
+            network.abort();
+          }
+        });
+        for (const [id, text] of validatedResults(batch, results))
+          found.set(id, text);
+      }
+      return units.flatMap((unit, index) => {
+        const text = joinLongUnit(pieces[index], found);
+        return text === undefined ? [] : [{ id: unit.id, text }];
+      });
     } catch (error) {
       lastError = error;
       if (!isRetryableError(error) || attempt === maxAttempts) break;

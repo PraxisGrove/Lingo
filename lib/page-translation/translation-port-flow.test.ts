@@ -59,6 +59,7 @@ describe('translation port flow', () => {
         translatedUnitCount: 1,
         totalUnitCount: 2,
       });
+      await vi.waitFor(() => expect(release).toBeDefined());
       release?.();
       await started;
       expect(session.snapshot()).toMatchObject({

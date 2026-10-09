@@ -1,0 +1,14 @@
+body {
+  margin: 0;
+  background: #f2f5f9;
+}
+
+html[data-theme="dark"] body {
+  background: #0e1625;
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-theme="system"] body {
+    background: #0e1625;
+  }
+}

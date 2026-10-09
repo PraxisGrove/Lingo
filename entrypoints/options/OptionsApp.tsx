@@ -14,6 +14,7 @@ import type { ExtensionMessages } from '@/lib/messaging/messages';
 import { sendMessage } from '@/lib/messaging/send-message';
 import { PROVIDER_DEFINITIONS } from '@/lib/providers/config';
 import { communityRuleStore } from '@/lib/rules/community-rules';
+import { ruleSubscriptionItem } from '@/lib/rules/rule-subscription';
 import { userRuleStore } from '@/lib/rules/user-rules';
 import {
   DEFAULT_SETTINGS,
@@ -54,6 +55,10 @@ function OptionsApp() {
   const [siteGlossaryText, setSiteGlossaryText] = useState('');
   const [qualityStatus, setQualityStatus] = useState('');
   const [ruleStatus, setRuleStatus] = useState('');
+  const [ruleUrl, setRuleUrl] = useState('');
+  const [ruleKey, setRuleKey] = useState('');
+  const [subscriptionStatus, setSubscriptionStatus] = useState('');
+  const [updatingRules, setUpdatingRules] = useState(false);
   const [communityUpdatesEnabled, setCommunityUpdatesEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [extensionStatus, setExtensionStatus] =
@@ -76,6 +81,15 @@ function OptionsApp() {
         logger.error('Could not load user rules.', { error });
         setRuleStatus(t('options.status.rulesLoadError'));
       });
+    void ruleSubscriptionItem
+      .getValue()
+      .then((subscription) => {
+        setRuleUrl(subscription?.url ?? '');
+        setRuleKey(subscription?.publicKey ?? '');
+      })
+      .catch((error) =>
+        logger.warn('Could not load rule subscription.', { error }),
+      );
     void communityRuleStore
       .get()
       .then((state) => setCommunityUpdatesEnabled(state.updatesEnabled))
@@ -102,6 +116,30 @@ function OptionsApp() {
     document.documentElement.dir = 'ltr';
     document.title = `${t('options.title.settings')} - Lingo`;
   }, [locale, settings.theme, t]);
+
+  async function updateSubscription() {
+    setUpdatingRules(true);
+    try {
+      const result = await sendMessage('updateCommunityRules', {
+        url: ruleUrl.trim(),
+        publicKey: ruleKey.trim(),
+      });
+      setSubscriptionStatus(
+        t(
+          result.status === 'updated'
+            ? 'rules.subscription.updated'
+            : result.status === 'disabled'
+              ? 'rules.subscription.disabled'
+              : 'rules.subscription.failed',
+        ),
+      );
+    } catch (error) {
+      logger.warn('Rule subscription update failed.', { error });
+      setSubscriptionStatus(t('rules.subscription.failed'));
+    } finally {
+      setUpdatingRules(false);
+    }
+  }
 
   async function refreshExtensionStatus() {
     setExtensionStatus(await sendMessage('getExtensionStatus', {}));
@@ -433,8 +471,64 @@ function OptionsApp() {
           </label>
         </div>
       </section>
+      <section className="panel" aria-labelledby="text-tools-heading">
+        <h2 id="text-tools-heading">{t('tools.title')}</h2>
+        <p>{t('tools.shortcuts')}</p>
+        <label className="row">
+          <span>
+            <strong>{t('tools.selectionButton')}</strong>
+            <small>{t('tools.selectionHelp')}</small>
+          </span>
+          <input
+            type="checkbox"
+            checked={settings.selectionButtonEnabled}
+            onChange={(event) =>
+              void updateSettings({
+                selectionButtonEnabled: event.currentTarget.checked,
+              })
+            }
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() =>
+            void browser.tabs.create({
+              url: browser.runtime.getURL('/translate.html'),
+            })
+          }
+        >
+          {t('tools.menuOpen')}
+        </button>
+      </section>
       <section className="panel" aria-labelledby="site-rules-heading">
         <h2 id="site-rules-heading">{t('options.rules.title')}</h2>
+        <p>{t('rules.subscription.help')}</p>
+        <label>
+          {t('rules.subscription.url')}
+          <input
+            type="url"
+            value={ruleUrl}
+            onChange={(event) => setRuleUrl(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          {t('rules.subscription.key')}
+          <input
+            value={ruleKey}
+            onChange={(event) => setRuleKey(event.currentTarget.value)}
+            spellCheck={false}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={
+            updatingRules || !communityUpdatesEnabled || !ruleUrl || !ruleKey
+          }
+          onClick={() => void updateSubscription()}
+        >
+          {t('rules.subscription.update')}
+        </button>
+        <p role="status">{subscriptionStatus}</p>
         <div className="rule-editor">
           <textarea
             aria-label={t('options.rules.jsonLabel')}

@@ -10,7 +10,7 @@ import {
 import { resolveTranslationQuality } from './quality';
 
 describe('TranslationOrchestrator', () => {
-  it('splits long pages on paragraph boundaries using a character budget', async () => {
+  it('splits long pages and oversized paragraphs within the character budget', async () => {
     const batches: string[][] = [];
     const configured = provider(async (input) => {
       batches.push(input.units.map((unit) => unit.text));
@@ -24,7 +24,8 @@ describe('TranslationOrchestrator', () => {
         maxBatchCharacters: 8,
       },
     });
-    for await (const _event of orchestrator.translate({
+    const events = [];
+    for await (const event of orchestrator.translate({
       sessionId: 'budget',
       pageRevision: 0,
       sourceLanguage: 'auto',
@@ -35,13 +36,15 @@ describe('TranslationOrchestrator', () => {
         { id: '3', number: 3, text: 'A long paragraph kept intact.' },
       ],
     })) {
-      /* Drain the public event stream. */
+      events.push(event);
     }
-    expect(batches).toEqual([
-      ['First.'],
-      ['Second.'],
-      ['A long paragraph kept intact.'],
-    ]);
+    expect(batches.flat().every((text) => text.length <= 8)).toBe(true);
+    expect(
+      events
+        .filter((event) => event.type === 'translated')
+        .map((event) => ('text' in event ? event.text : ''))
+        .sort(),
+    ).toEqual(['First.', 'Second.', 'A long paragraph kept intact.'].sort());
   });
 
   it('stops later batches after a blocking provider error', async () => {

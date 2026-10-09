@@ -1,6 +1,12 @@
 import type { TranslationUnit } from '@/lib/translation/types';
 import type { Logger } from '../logger/logger';
 import type { RuleSelectors } from '../rules/rule-resolver';
+import {
+  accessibleRoots,
+  composedClosest,
+  composedContains,
+  composedParent,
+} from './composed-dom';
 
 export type DisplayMode = 'bilingual' | 'translation' | 'original';
 export type ContentScope = 'main' | 'main-and-interface';
@@ -67,6 +73,7 @@ type PageTranslationDependencies = {
   getRuleSelectors?: () => Promise<RuleSelectors>;
   watchNavigation?: (listener: () => void) => () => void;
   logger?: Logger;
+  shadowStyle?: string;
 };
 
 type Candidate = {
@@ -79,10 +86,32 @@ type Candidate = {
   preservedElements: Map<string, HTMLElement>;
 };
 
+const OBSERVATION_OPTIONS: MutationObserverInit = {
+  childList: true,
+  characterData: true,
+  subtree: true,
+  attributes: true,
+  attributeFilter: [
+    'translate',
+    'contenteditable',
+    'hidden',
+    'aria-hidden',
+    'class',
+    'id',
+    'style',
+    'data-lingo-content',
+    'href',
+    'title',
+    'aria-label',
+  ],
+};
+
 const TRANSLATION_ATTRIBUTE = 'data-lingo-translation';
 const HIDDEN_ATTRIBUTE = 'data-lingo-hidden';
 const TABLE_CELL_HIDDEN_ATTRIBUTE = 'data-lingo-cell-original-hidden';
 const PROTECTED_SELECTOR = [
+  '[data-lingo-owned]',
+  '[data-lingo-floating-control]',
   '[data-lingo-content="exclude"]',
   '[translate="no"]',
   '[contenteditable]:not([contenteditable="false"])',
@@ -135,6 +164,7 @@ export function createPageTranslation({
   getRuleSelectors,
   watchNavigation,
   logger,
+  shadowStyle,
 }: PageTranslationDependencies): PageTranslation {
   const listeners = new Set<(event: PageTranslationEvent) => void>();
   const unitIds = new WeakMap<HTMLElement, string>();
@@ -148,9 +178,13 @@ export function createPageTranslation({
   const activeRequests = new Set<symbol>();
   let nextUnitId = 1;
   let observer: MutationObserver | undefined;
+  const observedRoots = new Set<ShadowRoot>();
+  const shadowStyles = new Set<HTMLStyleElement>();
+  let shadowDiscoveryTimer: ReturnType<typeof setInterval> | undefined;
   let intersectionObserver: IntersectionObserver | undefined;
   let mutationScheduled = false;
   const mutationRoots = new Set<Element>();
+  const invalidatedRoots = new Set<Element>();
   let activeOptions: StartSessionOptions | undefined;
   let selectors: RuleSelectors = {};
   let restoreHistory: (() => void) | undefined;
@@ -207,17 +241,27 @@ export function createPageTranslation({
     original.removeAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE);
   }
 
-  function refreshChangedContent(roots: Element[]) {
+  function refreshChangedContent(
+    roots: Element[],
+    invalidated: Element[] = [],
+  ) {
     for (const element of knownCandidates) {
       const candidate = processed.get(element);
       const detached = !element.isConnected;
       if (
         !detached &&
-        !roots.some((root) => root.contains(element) || element.contains(root))
+        !roots.some(
+          (root) =>
+            composedContains(root, element) || composedContains(element, root),
+        )
       )
         continue;
       if (
         !detached &&
+        !invalidated.some(
+          (root) =>
+            composedContains(root, element) || composedContains(element, root),
+        ) &&
         (!candidate ||
           encodeInlineContent(element).signature === candidate.signature)
       ) {
@@ -226,7 +270,11 @@ export function createPageTranslation({
       processed.delete(element);
       failedElements.delete(element);
       removeTranslation(element);
-      if (detached) {
+      if (
+        detached ||
+        !canTranslateContent(element) ||
+        excludedByRules(element, selectors)
+      ) {
         knownCandidates.delete(element);
         pending.delete(element);
         pausedVisibleElements.delete(element);
@@ -262,7 +310,8 @@ export function createPageTranslation({
       (element) =>
         !processed.has(element) &&
         element.isConnected &&
-        canTranslateContent(element),
+        canTranslateContent(element) &&
+        !excludedByRules(element, selectors),
     );
     registerCandidates(fresh);
     const candidates = fresh.map(createCandidate);
@@ -303,7 +352,8 @@ export function createPageTranslation({
         const text = unit.text;
         if (
           !candidate.element.isConnected ||
-          !canTranslateContent(candidate.element)
+          !canTranslateContent(candidate.element) ||
+          excludedByRules(candidate.element, selectors)
         ) {
           continue;
         }
@@ -545,20 +595,70 @@ export function createPageTranslation({
     );
   }
 
+  function observeShadowRoots(
+    scopes: Element[] = [document.documentElement],
+  ): Element[] {
+    const added: Element[] = [];
+    const detached = [...observedRoots].filter(
+      (root) => !root.host.isConnected,
+    );
+    if (detached.length > 0) {
+      for (const root of detached) observedRoots.delete(root);
+      for (const style of shadowStyles) {
+        if (!style.isConnected) {
+          style.remove();
+          shadowStyles.delete(style);
+        }
+      }
+      // MutationObserver cannot unobserve one root. Reconnect the live roots.
+      observer?.disconnect();
+      observer?.observe(document.documentElement, OBSERVATION_OPTIONS);
+      for (const root of observedRoots)
+        observer?.observe(root, OBSERVATION_OPTIONS);
+    }
+    for (const scope of scopes) {
+      for (const root of accessibleRoots(scope)) {
+        if (!(root instanceof ShadowRoot) || observedRoots.has(root)) continue;
+        observedRoots.add(root);
+        observer?.observe(root, OBSERVATION_OPTIONS);
+        if (shadowStyle) {
+          const style = document.createElement('style');
+          style.dataset.lingoOwned = '';
+          style.textContent = shadowStyle;
+          root.append(style);
+          shadowStyles.add(style);
+        }
+        added.push(root.host);
+      }
+    }
+    return added;
+  }
+
   function observePage() {
     observer = new MutationObserver((records) => {
       const changesSource = records.some((record) => {
         const target =
           record.target instanceof Element
             ? record.target
-            : record.target.parentElement;
-        if (target?.closest(`[${TRANSLATION_ATTRIBUTE}]`)) return false;
-        if (record.type === 'characterData') return true;
+            : record.target instanceof ShadowRoot
+              ? record.target.host
+              : record.target.parentElement;
+        if (
+          target &&
+          composedClosest(
+            target,
+            `[${TRANSLATION_ATTRIBUTE}], [data-lingo-owned]`,
+          )
+        )
+          return false;
+        if (record.type === 'characterData' || record.type === 'attributes')
+          return true;
         return [...record.addedNodes, ...record.removedNodes].some(
           (node) =>
             !(
               node instanceof Element &&
-              node.hasAttribute(TRANSLATION_ATTRIBUTE)
+              (node.hasAttribute(TRANSLATION_ATTRIBUTE) ||
+                node.hasAttribute('data-lingo-owned'))
             ),
         );
       });
@@ -567,11 +667,20 @@ export function createPageTranslation({
         const target =
           record.target instanceof Element
             ? record.target
-            : record.target.parentElement;
-        if (target && !target.closest(`[${TRANSLATION_ATTRIBUTE}]`)) {
+            : record.target instanceof ShadowRoot
+              ? record.target.host
+              : record.target.parentElement;
+        if (
+          target &&
+          !composedClosest(
+            target,
+            `[${TRANSLATION_ATTRIBUTE}], [data-lingo-owned]`,
+          )
+        ) {
           mutationRoots.add(
             target.closest(CONTENT_CANDIDATE_SELECTOR) ?? target,
           );
+          if (record.type === 'attributes') invalidatedRoots.add(target);
         }
       }
       if (mutationScheduled || !activeOptions) return;
@@ -581,7 +690,9 @@ export function createPageTranslation({
         const roots = [...mutationRoots];
         mutationRoots.clear();
         if (activeOptions) {
-          refreshChangedContent(roots);
+          observeShadowRoots(roots);
+          refreshChangedContent(roots, [...invalidatedRoots]);
+          invalidatedRoots.clear();
           schedule(
             findCandidates(
               document,
@@ -593,11 +704,21 @@ export function createPageTranslation({
         }
       });
     });
-    observer.observe(document.documentElement, {
-      childList: true,
-      characterData: true,
-      subtree: true,
-    });
+    observer.observe(document.documentElement, OBSERVATION_OPTIONS);
+    observeShadowRoots();
+    // attachShadow on an existing host emits no document mutation.
+    shadowDiscoveryTimer = setInterval(() => {
+      const added = observeShadowRoots();
+      if (activeOptions && added.length > 0)
+        schedule(
+          findCandidates(
+            document,
+            activeOptions.contentScope ?? 'main',
+            selectors,
+            added,
+          ),
+        );
+    }, 2000);
     if (typeof IntersectionObserver !== 'undefined') {
       intersectionObserver = new IntersectionObserver(
         (entries) => {
@@ -725,7 +846,12 @@ export function createPageTranslation({
       cancel?.();
       activeRequests.clear();
       mutationRoots.clear();
+      invalidatedRoots.clear();
       observer?.disconnect();
+      clearInterval(shadowDiscoveryTimer);
+      observedRoots.clear();
+      for (const style of shadowStyles) style.remove();
+      shadowStyles.clear();
       intersectionObserver?.disconnect();
       observer = undefined;
       intersectionObserver = undefined;
@@ -784,47 +910,73 @@ function findCandidates(
   selectors: RuleSelectors,
   changedRoots?: Element[],
 ): HTMLElement[] {
+  const documentRoots = accessibleRoots(document);
   const roots = [
     ...(selectors.main ?? []),
     ...(scope === 'main-and-interface' ? (selectors.interface ?? []) : []),
   ].flatMap((selector) => [
-    ...document.querySelectorAll<HTMLElement>(selector),
+    ...documentRoots.flatMap((root) => [
+      ...root.querySelectorAll<HTMLElement>(selector),
+    ]),
   ]);
   return [
     ...new Set([
-      ...(changedRoots ?? [document.documentElement]).flatMap((root) => [
-        ...(root.matches(CONTENT_CANDIDATE_SELECTOR)
-          ? [root as HTMLElement]
-          : []),
-        ...root.querySelectorAll<HTMLElement>(CONTENT_CANDIDATE_SELECTOR),
-      ]),
+      ...(changedRoots ?? [document.documentElement])
+        .flatMap((scopeRoot) => accessibleRoots(scopeRoot))
+        .flatMap((root) => [
+          ...(root instanceof HTMLElement &&
+          root.matches(CONTENT_CANDIDATE_SELECTOR)
+            ? [root as HTMLElement]
+            : []),
+          ...root.querySelectorAll<HTMLElement>(CONTENT_CANDIDATE_SELECTOR),
+        ]),
       ...roots.filter(
         (root) =>
           !changedRoots ||
           changedRoots.some(
-            (changed) => changed.contains(root) || root.contains(changed),
+            (changed) =>
+              composedContains(changed, root) ||
+              composedContains(root, changed),
           ),
       ),
     ]),
   ].filter(
     (element) =>
-      !element.closest(`[${TRANSLATION_ATTRIBUTE}]`) &&
+      !composedClosest(
+        element,
+        `[${TRANSLATION_ATTRIBUTE}], [data-lingo-owned]`,
+      ) &&
       canTranslateContent(element) &&
       !(selectors.exclude ?? []).some(
         (selector) =>
-          element.closest(selector) || element.querySelector(selector),
+          composedClosest(element, selector) || element.querySelector(selector),
       ) &&
       ((selectors.main?.length ?? 0) === 0 ||
-        selectors.main?.some((selector) => element.closest(selector)) ||
+        selectors.main?.some((selector) =>
+          composedClosest(element, selector),
+        ) ||
         (scope === 'main-and-interface' &&
           selectors.interface?.some((selector) =>
-            element.closest(selector),
+            composedClosest(element, selector),
           ))) &&
       (scope === 'main-and-interface' ||
-        !element.closest(INTERFACE_SELECTOR)) &&
+        !composedClosest(element, INTERFACE_SELECTOR)) &&
       !element.querySelector(CONTENT_CANDIDATE_SELECTOR) &&
-      (roots.some((root) => root.contains(element)) ||
+      ![element, ...element.querySelectorAll('*')].some(
+        (child) => child.shadowRoot || child.tagName === 'SLOT',
+      ) &&
+      (roots.some((root) => composedContains(root, element)) ||
         isContentCandidate(element, scope)),
+  );
+}
+
+function excludedByRules(
+  element: HTMLElement,
+  selectors: RuleSelectors,
+): boolean {
+  return (selectors.exclude ?? []).some(
+    (selector) =>
+      composedClosest(element, selector) || element.querySelector(selector),
   );
 }
 
@@ -832,7 +984,7 @@ function canTranslateContent(element: HTMLElement): boolean {
   // A paragraph is sent as one unit. Keep mixed protected/public paragraphs
   // intact so textContent cannot carry private descendants into the request.
   return (
-    !element.closest(PROTECTED_SELECTOR) &&
+    !composedClosest(element, PROTECTED_SELECTOR) &&
     [...element.querySelectorAll(PROTECTED_SELECTOR)].every(
       (child) => child.tagName === 'CODE' && !child.closest('pre'),
     ) &&
@@ -850,6 +1002,11 @@ function isVisible(element: HTMLElement): boolean {
   if (!view) return true;
   let current: HTMLElement | null = element;
   while (current) {
+    if (
+      current.parentElement instanceof HTMLSlotElement &&
+      current.parentElement.assignedNodes().length > 0
+    )
+      return false;
     const style = view.getComputedStyle(current);
     if (
       style.display === 'none' ||
@@ -859,7 +1016,7 @@ function isVisible(element: HTMLElement): boolean {
     ) {
       return false;
     }
-    current = current.parentElement;
+    current = composedParent(current) as HTMLElement | null;
   }
   return true;
 }
@@ -870,11 +1027,11 @@ function isContentCandidate(
 ): boolean {
   const text = element.textContent?.trim() ?? '';
   if (!text) return false;
-  if (element.closest('[data-lingo-content="main"], article, main'))
+  if (composedClosest(element, '[data-lingo-content="main"], article, main'))
     return true;
-  if (element.closest(INTERFACE_SELECTOR))
+  if (composedClosest(element, INTERFACE_SELECTOR))
     return scope === 'main-and-interface';
-  if (element.closest('aside')) return false;
+  if (composedClosest(element, 'aside')) return false;
   const linkTextLength = [...element.querySelectorAll('a')].reduce(
     (length, link) => length + (link.textContent?.trim().length ?? 0),
     0,
@@ -985,4 +1142,57 @@ function cloneTranslationShell(source: HTMLElement): HTMLElement {
     }
   }
   return clone;
+}
+
+/** Used by explicitly triggered paragraph translation, with the same protection rules. */
+export function readParagraph(element: Element) {
+  const paragraph = composedClosest(element, CONTENT_CANDIDATE_SELECTOR);
+  if (
+    !(paragraph instanceof HTMLElement) ||
+    !canTranslateContent(paragraph) ||
+    paragraph.querySelector(CONTENT_CANDIDATE_SELECTOR) ||
+    [paragraph, ...paragraph.querySelectorAll('*')].some(
+      (child) => child.shadowRoot || child.tagName === 'SLOT',
+    )
+  )
+    return;
+  const encoded = encodeInlineContent(paragraph);
+  if (!encoded.text) return;
+  return {
+    element: paragraph,
+    text: encoded.text,
+    render(target: HTMLElement, text: string) {
+      renderTranslatedContent(
+        target,
+        text,
+        encoded.inlineElements,
+        encoded.preservedElements,
+      );
+    },
+  };
+}
+
+export function readableSelection(document: Document): string | undefined {
+  const selection = document.getSelection();
+  if (selection?.rangeCount !== 1 || selection.isCollapsed) return;
+  const range = selection.getRangeAt(0);
+  const ancestor =
+    range.commonAncestorContainer instanceof Element
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+  if (
+    !ancestor ||
+    !isVisible(ancestor as HTMLElement) ||
+    composedClosest(ancestor, `${PROTECTED_SELECTOR}, [data-lingo-translation]`)
+  )
+    return;
+  for (const child of ancestor.querySelectorAll<HTMLElement>('*')) {
+    if (range.intersectsNode(child) && (!isVisible(child) || child.shadowRoot))
+      return;
+  }
+  const fragment = range.cloneContents();
+  if (fragment.querySelector(`${PROTECTED_SELECTOR}, [data-lingo-translation]`))
+    return;
+  const text = selection.toString().trim();
+  return text || undefined;
 }

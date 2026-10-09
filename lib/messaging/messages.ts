@@ -5,10 +5,21 @@ import type {
   SessionSnapshot as PageTranslationSnapshot,
 } from '@/lib/page-translation/page-translation';
 import type { ProviderProfile } from '@/lib/storage/settings-model';
+import type { TextAction } from '@/lib/ui/text-tools';
 
 export type MessageSource = 'popup' | 'options' | 'content';
 
 export type ExtensionMessages = {
+  updateCommunityRules: {
+    request: { url: string; publicKey: string };
+    response: {
+      status: 'updated' | 'rejected' | 'disabled' | 'unconfigured' | 'current';
+    };
+  };
+
+  openSettings: { request: Record<string, never>; response: { ok: true } };
+  runTextAction: { request: { action: TextAction }; response: { ok: true } };
+
   pageNavigation: {
     request: Record<string, never>;
     response: PageTranslationSnapshot;
@@ -99,6 +110,19 @@ export function isExtensionMessage(
   if (!isRecordWithKeys(message, ['type', 'payload'])) return false;
 
   switch (message.type) {
+    case 'updateCommunityRules':
+      return (
+        isRecordWithKeys(message.payload, ['url', 'publicKey']) &&
+        typeof message.payload.url === 'string' &&
+        typeof message.payload.publicKey === 'string'
+      );
+    case 'runTextAction':
+      return (
+        isRecordWithKeys(message.payload, ['action']) &&
+        ['selection', 'paragraph', 'input', 'open', 'undo'].includes(
+          message.payload.action as string,
+        )
+      );
     case 'ping':
       return (
         isRecordWithKeys(message.payload, ['source']) &&
@@ -106,6 +130,7 @@ export function isExtensionMessage(
           message.payload.source as string,
         )
       );
+    case 'openSettings':
     case 'getPageTranslation':
     case 'pageNavigation':
     case 'stopPageTranslation':

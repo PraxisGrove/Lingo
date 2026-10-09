@@ -380,6 +380,16 @@ function App() {
         </>
       )}
 
+      <button
+        type="button"
+        onClick={() =>
+          void browser.tabs.create({
+            url: browser.runtime.getURL('/translate.html'),
+          })
+        }
+      >
+        {t('tools.menuOpen')}
+      </button>
       <footer className="data-flow">
         <span>{t('popup.dataFlow')}</span>
         <strong>

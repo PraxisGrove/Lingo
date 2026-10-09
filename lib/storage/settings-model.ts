@@ -16,7 +16,7 @@ import {
 
 export type ExtensionTheme = 'system' | 'light' | 'dark';
 
-export const CURRENT_SETTINGS_SCHEMA_VERSION = 8 as const;
+export const CURRENT_SETTINGS_SCHEMA_VERSION = 9 as const;
 
 export type ProviderKind =
   | 'openai-compatible'
@@ -46,6 +46,7 @@ export type ExtensionSettings = {
   fallbackProviderProfileIds: string[];
   translationCacheEnabled: boolean;
   floatingButtonEnabled: boolean;
+  selectionButtonEnabled: boolean;
   translationQuality: TranslationQualitySettings;
   siteGlossaries: Record<string, GlossaryEntry[]>;
   autoTranslation: AutoTranslationPreferences;
@@ -64,6 +65,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   fallbackProviderProfileIds: [],
   translationCacheEnabled: true,
   floatingButtonEnabled: false,
+  selectionButtonEnabled: true,
   translationQuality: DEFAULT_TRANSLATION_QUALITY,
   siteGlossaries: {},
   autoTranslation: {
@@ -91,6 +93,7 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
     candidate.schemaVersion !== 5 &&
     candidate.schemaVersion !== 6 &&
     candidate.schemaVersion !== 7 &&
+    candidate.schemaVersion !== 8 &&
     candidate.schemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION
   ) {
     return DEFAULT_SETTINGS;
@@ -146,6 +149,10 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
       typeof candidate.floatingButtonEnabled === 'boolean'
         ? candidate.floatingButtonEnabled
         : DEFAULT_SETTINGS.floatingButtonEnabled,
+    selectionButtonEnabled:
+      typeof candidate.selectionButtonEnabled === 'boolean'
+        ? candidate.selectionButtonEnabled
+        : DEFAULT_SETTINGS.selectionButtonEnabled,
     translationQuality: resolveQualitySettings(candidate.translationQuality),
     siteGlossaries: resolveSiteGlossaries(candidate.siteGlossaries),
     autoTranslation: resolveAutoTranslation(candidate.autoTranslation),
