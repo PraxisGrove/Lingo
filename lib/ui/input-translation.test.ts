@@ -6,6 +6,37 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 describe('explicit input translation', () => {
+  it.each([
+    'readonly',
+    'disabled',
+    'password',
+    'payment',
+    'rich',
+  ])('rejects a field that becomes %s while translation is pending', (change) => {
+    document.body.innerHTML = '<input value="Hello">';
+    const field = document.querySelector('input');
+    if (!field) throw new Error('Missing field');
+    const captured = captureInput(field);
+    if (change === 'readonly') field.readOnly = true;
+    if (change === 'disabled') field.disabled = true;
+    if (change === 'password') field.type = 'password';
+    if (change === 'payment') field.autocomplete = 'cc-number';
+    if (change === 'rich') field.setAttribute('translate', 'no');
+    expect(captured?.apply('你好')).toBe(false);
+    expect(field.value).toBe('Hello');
+  });
+
+  it('does not destroy markup added to a previously plain editable field', () => {
+    document.body.innerHTML =
+      '<div contenteditable="plaintext-only">Hello</div>';
+    const field = document.querySelector('div');
+    if (!field) throw new Error('Missing field');
+    const captured = captureInput(field);
+    field.innerHTML = '<em>Hello</em>';
+    expect(captured?.apply('你好')).toBe(false);
+    expect(field.innerHTML).toBe('<em>Hello</em>');
+  });
+
   it('confirms replacement, dispatches input, and safely restores the original', () => {
     document.body.innerHTML = '<textarea>Hello</textarea>';
     const field = document.querySelector('textarea');

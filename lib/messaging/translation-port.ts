@@ -42,11 +42,16 @@ export function isTranslationPortRequest(
         'targetLanguage',
         'units',
       ],
-      ['pageTitle', 'siteHostname'],
+      ['pageTitle', 'siteHostname', 'sourceLanguageOverride'],
     ) &&
     typeof request.sessionId === 'string' &&
     Number.isInteger(request.pageRevision) &&
     typeof request.sourceLanguage === 'string' &&
+    (request.sourceLanguageOverride === undefined ||
+      (typeof request.sourceLanguageOverride === 'string' &&
+        /^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)$/.test(
+          request.sourceLanguageOverride,
+        ))) &&
     typeof request.targetLanguage === 'string' &&
     (request.pageTitle === undefined ||
       typeof request.pageTitle === 'string') &&
@@ -163,6 +168,7 @@ export type TranslationPortClient = {
     units: TranslationUnit[],
     targetLanguage: string,
     onProgress?: (translations: TranslationUnit[]) => void,
+    options?: { sourceLanguage?: string },
   ): Promise<TranslationClientResult>;
   cancel(): void;
   disconnect(): void;
@@ -211,7 +217,7 @@ export function createTranslationPortClient(
   };
 
   return {
-    async translate(units, targetLanguage, onProgress) {
+    async translate(units, targetLanguage, onProgress, options) {
       if (closed) {
         return Promise.reject(
           disconnectError('The translation client was closed.'),
@@ -314,6 +320,9 @@ export function createTranslationPortClient(
                 sessionId,
                 pageRevision: 0,
                 sourceLanguage: 'auto',
+                ...(options?.sourceLanguage
+                  ? { sourceLanguageOverride: options.sourceLanguage }
+                  : {}),
                 targetLanguage,
                 pageTitle: getPageTitle(),
                 siteHostname: getSiteHostname(),

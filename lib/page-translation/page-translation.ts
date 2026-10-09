@@ -5,7 +5,7 @@ import {
   accessibleRoots,
   composedClosest,
   composedContains,
-  composedParent,
+  isComposedVisible,
 } from './composed-dom';
 
 export type DisplayMode = 'bilingual' | 'translation' | 'original';
@@ -13,6 +13,7 @@ export type ContentScope = 'main' | 'main-and-interface';
 
 export type StartSessionOptions = {
   targetLanguage: string;
+  restart?: boolean;
   displayMode: DisplayMode;
   contentScope?: ContentScope;
   translateImmediately?: boolean;
@@ -84,6 +85,7 @@ type Candidate = {
   signature: string;
   inlineElements: Map<string, HTMLElement>;
   preservedElements: Map<string, HTMLElement>;
+  translatedText?: string;
 };
 
 const OBSERVATION_OPTIONS: MutationObserverInit = {
@@ -103,6 +105,8 @@ const OBSERVATION_OPTIONS: MutationObserverInit = {
     'href',
     'title',
     'aria-label',
+    'slot',
+    'name',
   ],
 };
 
@@ -241,10 +245,7 @@ export function createPageTranslation({
     original.removeAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE);
   }
 
-  function refreshChangedContent(
-    roots: Element[],
-    invalidated: Element[] = [],
-  ) {
+  function refreshChangedContent(roots: Element[], rechecked: Element[] = []) {
     for (const element of knownCandidates) {
       const candidate = processed.get(element);
       const detached = !element.isConnected;
@@ -256,15 +257,65 @@ export function createPageTranslation({
         )
       )
         continue;
-      if (
-        !detached &&
-        !invalidated.some(
+      const checkEligibility =
+        detached ||
+        rechecked.some(
           (root) =>
             composedContains(root, element) || composedContains(element, root),
-        ) &&
-        (!candidate ||
-          encodeInlineContent(element).signature === candidate.signature)
-      ) {
+        );
+      let eligible = !detached;
+      let cellFontSize: string | undefined;
+      if (eligible && checkEligibility) {
+        // Temporarily remove our display flag while evaluating the page's own
+        // visibility. Restore it synchronously, without repainting or replacing DOM.
+        const hidden = element.hasAttribute(HIDDEN_ATTRIBUTE);
+        const cellHidden = element.hasAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE);
+        if (hidden) element.removeAttribute(HIDDEN_ATTRIBUTE);
+        if (cellHidden) element.removeAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE);
+        eligible =
+          canTranslateContent(element) && !excludedByRules(element, selectors);
+        if (eligible && isTableCell(element))
+          cellFontSize =
+            document.defaultView?.getComputedStyle(element).fontSize;
+        if (hidden) element.setAttribute(HIDDEN_ATTRIBUTE, '');
+        if (cellHidden) element.setAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE, '');
+      }
+      const encoded = detached ? undefined : encodeInlineContent(element);
+      if (eligible && (!candidate || encoded?.text === candidate.encodedText)) {
+        if (candidate && encoded) {
+          const changed = encoded.signature !== candidate.signature;
+          candidate.signature = encoded.signature;
+          candidate.inlineElements = encoded.inlineElements;
+          candidate.preservedElements = encoded.preservedElements;
+          const translation = insertedTranslations.get(element);
+          if (translation) {
+            if (cellFontSize) translation.style.fontSize = cellFontSize;
+            if (changed && candidate.translatedText) {
+              translation.replaceChildren();
+              renderTranslatedContent(
+                translation,
+                candidate.translatedText,
+                encoded.inlineElements,
+                encoded.preservedElements,
+              );
+            }
+            if (checkEligibility && !isTableCell(element)) {
+              const shell = cloneTranslationShell(element);
+              for (const attribute of [...translation.attributes]) {
+                if (
+                  ![TRANSLATION_ATTRIBUTE, 'lang', 'hidden'].includes(
+                    attribute.name,
+                  )
+                )
+                  translation.removeAttribute(attribute.name);
+              }
+              for (const attribute of [...shell.attributes]) {
+                if (!['lang', 'hidden'].includes(attribute.name))
+                  translation.setAttribute(attribute.name, attribute.value);
+              }
+            }
+          }
+        }
         continue;
       }
       processed.delete(element);
@@ -272,6 +323,7 @@ export function createPageTranslation({
       removeTranslation(element);
       if (
         detached ||
+        !eligible ||
         !canTranslateContent(element) ||
         excludedByRules(element, selectors)
       ) {
@@ -379,6 +431,7 @@ export function createPageTranslation({
         } else {
           candidate.element.after(translation);
         }
+        candidate.translatedText = text;
         insertedTranslations.set(candidate.element, translation);
         applyUnitDisplayMode(
           candidate.element,
@@ -435,7 +488,15 @@ export function createPageTranslation({
           isCurrentCandidate(candidate) &&
           !insertedTranslations.has(candidate.element),
       );
-      if (currentCandidates.length === 0) return;
+      if (currentCandidates.length === 0) {
+        if (
+          activeRequests.size === 0 &&
+          pending.size === 0 &&
+          !isGloballyPaused(current)
+        )
+          publish({ ...current, status: 'translated' });
+        return;
+      }
       for (const candidate of currentCandidates)
         failedElements.add(candidate.element);
       publish({
@@ -459,7 +520,15 @@ export function createPageTranslation({
     ) {
       return;
     }
-    if (!candidates.some(isCurrentCandidate)) return;
+    if (!candidates.some(isCurrentCandidate)) {
+      if (
+        activeRequests.size === 0 &&
+        pending.size === 0 &&
+        !isGloballyPaused(current)
+      )
+        publish({ ...current, status: 'translated' });
+      return;
+    }
     renderResults(translations);
     for (const candidate of candidates) {
       if (
@@ -636,7 +705,7 @@ export function createPageTranslation({
 
   function observePage() {
     observer = new MutationObserver((records) => {
-      const changesSource = records.some((record) => {
+      const changes = records.filter((record) => {
         const target =
           record.target instanceof Element
             ? record.target
@@ -662,8 +731,8 @@ export function createPageTranslation({
             ),
         );
       });
-      if (!changesSource) return;
-      for (const record of records) {
+      if (changes.length === 0) return;
+      for (const record of changes) {
         const target =
           record.target instanceof Element
             ? record.target
@@ -680,7 +749,8 @@ export function createPageTranslation({
           mutationRoots.add(
             target.closest(CONTENT_CANDIDATE_SELECTOR) ?? target,
           );
-          if (record.type === 'attributes') invalidatedRoots.add(target);
+          if (record.type === 'attributes' || record.type === 'childList')
+            invalidatedRoots.add(target);
         }
       }
       if (mutationScheduled || !activeOptions) return;
@@ -759,10 +829,19 @@ export function createPageTranslation({
   return {
     async start(options) {
       if (current.status !== 'idle') {
-        return this.update({
-          displayMode: options.displayMode,
-          translateImmediately: options.translateImmediately,
-        });
+        const next = { ...activeOptions, ...options };
+        if (
+          !options.restart &&
+          next.targetLanguage === activeOptions?.targetLanguage &&
+          next.contentScope === activeOptions?.contentScope
+        ) {
+          return this.update({
+            displayMode: options.displayMode,
+            translateImmediately: options.translateImmediately,
+          });
+        }
+        await this.stop();
+        options = next;
       }
       activeOptions = options;
       pageUrl = document.location.href;
@@ -810,6 +889,16 @@ export function createPageTranslation({
       return current;
     },
     async update(patch) {
+      if (
+        activeOptions &&
+        patch.retryFailed &&
+        knownCandidates.size === 0 &&
+        current.failure?.category === 'invalid-request'
+      ) {
+        const retryOptions = { ...activeOptions, ...patch };
+        await this.stop();
+        return this.start(retryOptions);
+      }
       if (activeOptions) {
         activeOptions = { ...activeOptions, ...patch };
         if (patch.retryFailed) {
@@ -985,40 +1074,18 @@ function canTranslateContent(element: HTMLElement): boolean {
   // intact so textContent cannot carry private descendants into the request.
   return (
     !composedClosest(element, PROTECTED_SELECTOR) &&
-    [...element.querySelectorAll(PROTECTED_SELECTOR)].every(
-      (child) => child.tagName === 'CODE' && !child.closest('pre'),
-    ) &&
-    isVisible(element) &&
-    [...element.querySelectorAll<HTMLElement>('*')].every(isVisible)
+    [...element.querySelectorAll(PROTECTED_SELECTOR)]
+      .filter((child) => !composedClosest(child, `[${TRANSLATION_ATTRIBUTE}]`))
+      .every((child) => child.tagName === 'CODE' && !child.closest('pre')) &&
+    isComposedVisible(element) &&
+    [...element.querySelectorAll<HTMLElement>('*')]
+      .filter((child) => !composedClosest(child, `[${TRANSLATION_ATTRIBUTE}]`))
+      .every(isComposedVisible)
   );
 }
 
 function isTableCell(element: HTMLElement): boolean {
   return element.tagName === 'TD' || element.tagName === 'TH';
-}
-
-function isVisible(element: HTMLElement): boolean {
-  const view = element.ownerDocument.defaultView;
-  if (!view) return true;
-  let current: HTMLElement | null = element;
-  while (current) {
-    if (
-      current.parentElement instanceof HTMLSlotElement &&
-      current.parentElement.assignedNodes().length > 0
-    )
-      return false;
-    const style = view.getComputedStyle(current);
-    if (
-      style.display === 'none' ||
-      style.visibility === 'hidden' ||
-      style.visibility === 'collapse' ||
-      style.getPropertyValue('content-visibility') === 'hidden'
-    ) {
-      return false;
-    }
-    current = composedParent(current) as HTMLElement | null;
-  }
-  return true;
 }
 
 function isContentCandidate(
@@ -1049,7 +1116,18 @@ function encodeInlineContent(element: HTMLElement): {
   const inlineElements = new Map<string, HTMLElement>();
   const preservedElements = new Map<string, HTMLElement>();
   function encode(node: Node): string {
-    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+    if (node.nodeType === Node.TEXT_NODE) {
+      return (node.textContent ?? '').replace(
+        /⟦(?:\/?\d+|KEEP:\d+)⟧/g,
+        (literal) => {
+          const marker = String(nextMarker++);
+          const span = element.ownerDocument.createElement('span');
+          span.textContent = literal;
+          preservedElements.set(marker, span);
+          return `⟦KEEP:${marker}⟧`;
+        },
+      );
+    }
     if (node instanceof Element && node.hasAttribute(TRANSLATION_ATTRIBUTE))
       return '';
     if (node instanceof HTMLElement && node.tagName === 'CODE') {
@@ -1070,6 +1148,11 @@ function encodeInlineContent(element: HTMLElement): {
     signature: JSON.stringify([
       text,
       [...preservedElements.values()].map((node) => node.outerHTML),
+      [...inlineElements.values()].map((node) =>
+        [...node.attributes]
+          .filter((attribute) => !attribute.name.startsWith('data-lingo-'))
+          .map((attribute) => [attribute.name, attribute.value]),
+      ),
     ]),
     inlineElements,
     preservedElements,
@@ -1172,27 +1255,71 @@ export function readParagraph(element: Element) {
   };
 }
 
-export function readableSelection(document: Document): string | undefined {
+export function captureReadableSelection(
+  document: Document,
+): { text: string; range: Range } | undefined {
   const selection = document.getSelection();
   if (selection?.rangeCount !== 1 || selection.isCollapsed) return;
-  const range = selection.getRangeAt(0);
+  let focused = document.activeElement;
+  while (focused?.shadowRoot?.activeElement)
+    focused = focused.shadowRoot.activeElement;
+  if (
+    focused &&
+    composedClosest(
+      focused,
+      'input, textarea, [contenteditable]:not([contenteditable="false"])',
+    )
+  )
+    return;
+  let range: Range;
+  if (typeof selection.getComposedRanges === 'function') {
+    const roots = accessibleRoots(document).filter(
+      (root): root is ShadowRoot => root instanceof ShadowRoot,
+    );
+    const composed = selection.getComposedRanges({ shadowRoots: roots })[0];
+    if (
+      !composed ||
+      composed.startContainer.getRootNode() !==
+        composed.endContainer.getRootNode()
+    )
+      return;
+    range = document.createRange();
+    range.setStart(composed.startContainer, composed.startOffset);
+    range.setEnd(composed.endContainer, composed.endOffset);
+  } else range = selection.getRangeAt(0).cloneRange();
+  const root = range.startContainer.getRootNode();
+  if (root instanceof ShadowRoot && root.mode !== 'open') return;
+  const text = readableRange(range);
+  if (!text || text !== selection.toString().trim()) return;
+  return { text, range };
+}
+
+export function readableSelection(document: Document): string | undefined {
+  return captureReadableSelection(document)?.text;
+}
+
+export function readableRange(range: Range): string | undefined {
+  if (range.collapsed) return;
   const ancestor =
     range.commonAncestorContainer instanceof Element
       ? range.commonAncestorContainer
       : range.commonAncestorContainer.parentElement;
   if (
     !ancestor ||
-    !isVisible(ancestor as HTMLElement) ||
+    !isComposedVisible(ancestor as HTMLElement) ||
     composedClosest(ancestor, `${PROTECTED_SELECTOR}, [data-lingo-translation]`)
   )
     return;
   for (const child of ancestor.querySelectorAll<HTMLElement>('*')) {
-    if (range.intersectsNode(child) && (!isVisible(child) || child.shadowRoot))
+    if (
+      range.intersectsNode(child) &&
+      (!isComposedVisible(child) || child.shadowRoot)
+    )
       return;
   }
   const fragment = range.cloneContents();
   if (fragment.querySelector(`${PROTECTED_SELECTOR}, [data-lingo-translation]`))
     return;
-  const text = selection.toString().trim();
+  const text = range.toString().trim();
   return text || undefined;
 }

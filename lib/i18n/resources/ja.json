@@ -200,5 +200,7 @@
   "rules.subscription.failed": "更新できませんでした。前回の検証済みルールを保持します。",
   "rules.subscription.help": "信頼できる HTTPS ルールと発行者の公開鍵を登録してください。次の翻訳から適用されます。",
   "rules.subscription.disabled": "コミュニティ更新は無効です。",
-  "tools.protected": "この内容はサイトのルールで除外されています。"
+  "tools.protected": "内容が変更されたか、保護・除外されています。選択し直してください。",
+  "tools.sourceLanguage": "元の言語（auto は自動検出）",
+  "tools.detect": "自動検出"
 }

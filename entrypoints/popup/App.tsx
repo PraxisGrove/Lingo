@@ -121,7 +121,19 @@ function App() {
   async function updateSettings(
     patch: Partial<Omit<ExtensionSettings, 'schemaVersion'>>,
   ) {
-    setSettingsState(await setSettings(patch));
+    const next = await setSettings(patch);
+    setSettingsState(next);
+    if (
+      page &&
+      page.status !== 'idle' &&
+      ('targetLanguage' in patch || 'activeProviderProfileId' in patch)
+    ) {
+      await runCommand('startPageTranslation', {
+        targetLanguage: next.targetLanguage,
+        displayMode: page.displayMode,
+        restart: true,
+      });
+    }
   }
 
   async function updateSitePolicy(policy: SiteTranslationPolicy) {

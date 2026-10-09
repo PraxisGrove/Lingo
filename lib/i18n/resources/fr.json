@@ -200,5 +200,7 @@
   "rules.subscription.failed": "Échec de la mise à jour. Les dernières règles vérifiées sont conservées.",
   "rules.subscription.help": "Indiquez un paquet HTTPS fiable et la clé publique de son éditeur. Application à la prochaine traduction.",
   "rules.subscription.disabled": "Les mises à jour communautaires sont désactivées.",
-  "tools.protected": "Ce contenu est exclu par les règles du site."
+  "tools.protected": "Le contenu a changé, est protégé ou exclu. Sélectionnez-le à nouveau.",
+  "tools.sourceLanguage": "Langue source (auto : détection)",
+  "tools.detect": "Détection automatique"
 }

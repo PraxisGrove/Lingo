@@ -100,6 +100,15 @@ describe('translation port flow', () => {
         targetLanguage: 'zh-CN',
       }),
     );
+    await client.translate(
+      [{ id: 'explicit-source', number: 1, text: '你好' }],
+      'en',
+      undefined,
+      { sourceLanguage: 'auto' },
+    );
+    expect(translateBatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sourceLanguage: 'auto', targetLanguage: 'en' }),
+    );
     client.disconnect();
   });
 

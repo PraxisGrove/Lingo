@@ -22,8 +22,9 @@ explorations; they are not prerequisites for this extension stage.
 - Completed batches appear while remaining requests are still running. Long
   pages are grouped by paragraph count and conservative character budgets.
   Oversized paragraphs are split and reassembled with inline formatting intact.
-- Saved source-language selection is applied in the background to translation
-  requests and cache keys. Stopping a session cancels queued work and aborts
+- Saved source-language selection is applied in the background to webpage
+  requests and cache keys. Text tools have their own source-language control,
+  which defaults to automatic detection. Stopping a session cancels queued work and aborts
   pending requests; translation can be started again without reloading the page.
 - Bilingual and translation-only display, with links, emphasis, headings,
   lists, captions, and tables preserved.
@@ -89,7 +90,8 @@ Local provider contracts do not verify translation quality, account limits, or b
 Text shortcuts require focus in the webpage. Selection and input actions are
 also available in the context menu, including inside frames. Password, payment,
 read-only, and rich-text fields are excluded. The selection button can be turned
-off in settings. Rule publishers can follow [the subscription guide](./docs/rule-subscriptions.md).
+off in settings. Changing the current page target language or service restarts
+that page session while preserving its scope and display mode. Rule publishers can follow [the subscription guide](./docs/rule-subscriptions.md).
 
 ## Product Design
 

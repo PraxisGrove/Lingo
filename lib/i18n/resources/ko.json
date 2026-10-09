@@ -200,5 +200,7 @@
   "rules.subscription.failed": "업데이트에 실패했습니다. 이전 규칙을 유지합니다.",
   "rules.subscription.help": "신뢰할 수 있는 HTTPS 규칙과 게시자의 공개 키를 등록하세요. 다음 번역부터 적용됩니다.",
   "rules.subscription.disabled": "커뮤니티 업데이트가 꺼져 있습니다.",
-  "tools.protected": "사이트 규칙에서 제외된 내용입니다."
+  "tools.protected": "내용이 변경되었거나 보호 또는 제외되었습니다. 다시 선택하세요.",
+  "tools.sourceLanguage": "원문 언어(auto는 자동 감지)",
+  "tools.detect": "자동 감지"
 }

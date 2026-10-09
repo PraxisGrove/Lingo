@@ -1,15 +1,25 @@
+import { SUPPORTED_UI_LOCALES } from '../i18n/locales';
 import type { MessageKey } from '../i18n/resources';
 import type { TranslationPortClient } from '../messaging/translation-port';
 import { composedClosest } from '../page-translation/composed-dom';
 import {
-  readableSelection,
+  captureReadableSelection,
+  readableRange,
   readParagraph,
 } from '../page-translation/page-translation';
 import type { RuleSelectors } from '../rules/rule-resolver';
 import type { ExtensionSettings } from '../storage/settings-model';
+import { protectLiteralMarkers } from '../translation/inline-markers';
 import { captureInput, type InputTranslation } from './input-translation';
 
 export type TextAction = 'selection' | 'paragraph' | 'input' | 'open' | 'undo';
+const KEY_ACTIONS: Partial<Record<string, TextAction>> = {
+  KeyS: 'selection',
+  KeyH: 'paragraph',
+  KeyI: 'input',
+  KeyT: 'open',
+  KeyU: 'undo',
+};
 type Dependencies = {
   document: Document;
   client: TranslationPortClient;
@@ -67,6 +77,39 @@ export function createTextTools({
   const language = document.createElement('input');
   language.value = 'zh-CN';
   languageLabel.append(language);
+  const sourceLanguageLabel = document.createElement('label');
+  sourceLanguageLabel.textContent = t('tools.sourceLanguage');
+  const sourceLanguage = document.createElement('input');
+  sourceLanguage.value = 'auto';
+  sourceLanguageLabel.append(sourceLanguage);
+  const choices = document.createElement('datalist');
+  choices.id = 'lingo-language-codes';
+  for (const code of SUPPORTED_UI_LOCALES) {
+    const option = document.createElement('option');
+    option.value = code;
+    option.label = t(`language.${code}`);
+    localized.push(() => {
+      option.label = t(`language.${code}`);
+    });
+    choices.append(option);
+  }
+  const automatic = document.createElement('option');
+  automatic.value = 'auto';
+  automatic.label = t('tools.detect');
+  localized.push(() => {
+    automatic.label = t('tools.detect');
+  });
+  const sourceChoices = choices.cloneNode(true) as HTMLDataListElement;
+  sourceChoices.id = 'lingo-source-language-codes';
+  for (const option of sourceChoices.querySelectorAll('option'))
+    localized.push(() => {
+      option.label = t(
+        `language.${option.value as (typeof SUPPORTED_UI_LOCALES)[number]}`,
+      );
+    });
+  sourceChoices.append(automatic);
+  language.setAttribute('list', choices.id);
+  sourceLanguage.setAttribute('list', sourceChoices.id);
   const service = document.createElement('p');
   const status = document.createElement('p');
   status.setAttribute('role', 'status');
@@ -101,6 +144,9 @@ export function createTextTools({
     header,
     label,
     languageLabel,
+    sourceLanguageLabel,
+    choices,
+    sourceChoices,
     service,
     actions,
     status,
@@ -116,6 +162,9 @@ export function createTextTools({
   root.append(style, panel, chip);
   (standalone ? document.body : document.documentElement).append(host);
   if (standalone) host.dataset.standalone = '';
+  let translationSettingsKey: string | undefined;
+  let defaultTargetLanguage: string | undefined;
+  let originFocus: Element | null = null;
   let token = 0;
   let enabled = true;
   let selectionButtonEnabled = true;
@@ -127,7 +176,7 @@ export function createTextTools({
   let translatedText: string | undefined;
   let paragraph: ReturnType<typeof readParagraph>;
   let selectionContext:
-    | { element: Element; fragment: DocumentFragment }
+    | { element: Element; range: Range; text: string }
     | undefined;
 
   function cancelRequest() {
@@ -141,6 +190,12 @@ export function createTextTools({
     cancelRequest();
     panel.hidden = true;
     chip.hidden = true;
+    if (
+      originFocus instanceof HTMLElement &&
+      originFocus.isConnected &&
+      !standalone
+    )
+      originFocus.focus();
   }
   function restoreInput() {
     status.textContent = lastInput?.undo()
@@ -156,6 +211,11 @@ export function createTextTools({
     readable?: ReturnType<typeof readParagraph>,
   ) {
     cancelRequest();
+    if (panel.hidden) {
+      originFocus = document.activeElement;
+      while (originFocus?.shadowRoot?.activeElement)
+        originFocus = originFocus.shadowRoot.activeElement;
+    }
     input = captured;
     paragraph = readable;
     selectionContext = undefined;
@@ -178,14 +238,12 @@ export function createTextTools({
     else source.focus();
   }
   function openSelection() {
-    const text = readableSelection(document);
-    const range = document.getSelection()?.getRangeAt(0);
-    if (!text || !range) return;
+    const selection = captureReadableSelection(document);
+    if (!selection) return;
+    const { text, range } = selection;
     const node = range.commonAncestorContainer;
     const element = node instanceof Element ? node : node.parentElement;
-    const context = element
-      ? { element, fragment: range.cloneContents() }
-      : undefined;
+    const context = element ? { element, range, text } : undefined;
     open(text);
     selectionContext = context;
     void run();
@@ -195,7 +253,8 @@ export function createTextTools({
     cancelRequest();
     const requestToken = token;
     const sourceAtStart = source.value;
-    const text = paragraph?.text ?? sourceAtStart;
+    const literals = protectLiteralMarkers(sourceAtStart);
+    const text = paragraph?.text ?? literals.text;
     translatedText = undefined;
     apply.disabled = true;
     output.replaceChildren();
@@ -204,8 +263,11 @@ export function createTextTools({
       return;
     }
     if (
-      text.length > 100_000 ||
-      !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(language.value)
+      sourceAtStart.length > 100_000 ||
+      !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(language.value) ||
+      !/^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)$/.test(
+        sourceLanguage.value,
+      )
     ) {
       status.textContent = t('tools.invalid');
       return;
@@ -237,13 +299,23 @@ export function createTextTools({
             (selector) =>
               composedClosest(element, selector) ||
               (selectionContext
-                ? selectionContext.fragment.querySelector(selector)
+                ? selectionContext.range.cloneContents().querySelector(selector)
                 : element.querySelector(selector)),
           )
         ) {
           status.textContent = t('tools.protected');
           return;
         }
+      }
+      if (
+        (paragraph &&
+          readParagraph(paragraph.element)?.text !== paragraph.text) ||
+        (selectionContext &&
+          readableRange(selectionContext.range) !== selectionContext.text) ||
+        (input && !input.isCurrent())
+      ) {
+        status.textContent = t('tools.protected');
+        return;
       }
       const profile = settings.providerProfiles.find(
         (item) => item.id === settings.activeProviderProfileId,
@@ -252,16 +324,19 @@ export function createTextTools({
       const result = await client.translate(
         [{ id: 'text-tool', number: 1, text }],
         language.value,
+        undefined,
+        { sourceLanguage: sourceLanguage.value },
       );
       if (requestToken !== token || source.value !== sourceAtStart) return;
       const translations = Array.isArray(result) ? result : result.translations;
       const translated = translations[0]?.text;
       if (!translated) throw new Error(t('tools.failed'));
-      translatedText = translated;
+      translatedText = paragraph ? translated : literals.restore(translated);
       if (paragraph) paragraph.render(output, translated);
-      else output.textContent = translated;
-      apply.disabled = !input;
-      status.textContent = '';
+      else output.textContent = translatedText;
+      apply.disabled = !input?.isCurrent();
+      status.textContent =
+        input && !input.isCurrent() ? t('tools.changed') : '';
     } catch (error) {
       if (requestToken === token)
         status.textContent = `${t('tools.failed')} ${error instanceof Error ? error.message : ''}`;
@@ -279,7 +354,11 @@ export function createTextTools({
       return;
     }
     if (action === 'open') {
-      open('');
+      if (source.value && !paragraph && !input) {
+        panel.hidden = false;
+        chip.hidden = true;
+        source.focus();
+      } else open('');
       return;
     }
     if (action === 'selection') {
@@ -311,18 +390,18 @@ export function createTextTools({
         | undefined) ?? null;
   };
   const onSelection = () => {
-    selected =
-      enabled && selectionButtonEnabled
-        ? readableSelection(document)
+    const selection =
+      enabled && selectionButtonEnabled && panel.hidden
+        ? captureReadableSelection(document)
         : undefined;
+    selected = selection?.text;
     chip.hidden = !selected;
-    if (!selected) return;
-    const rect = document.getSelection()?.getRangeAt(0).getBoundingClientRect();
-    if (rect) {
-      chip.style.left = `${Math.max(8, Math.min(rect.right, (document.defaultView?.innerWidth ?? 800) - 180))}px`;
-      chip.style.top = `${Math.max(8, Math.min(rect.bottom + 8, (document.defaultView?.innerHeight ?? 600) - 50))}px`;
-    }
+    if (!selection) return;
+    const rect = selection.range.getBoundingClientRect();
+    chip.style.left = `${Math.max(8, Math.min(rect.right, (document.defaultView?.innerWidth ?? 800) - 180))}px`;
+    chip.style.top = `${Math.max(8, Math.min(rect.bottom + 8, (document.defaultView?.innerHeight ?? 600) - 50))}px`;
   };
+
   const onKey = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && !panel.hidden && !standalone) {
       dismiss();
@@ -336,16 +415,8 @@ export function createTextTools({
       event.repeat
     )
       return;
-    const action = (
-      {
-        KeyS: 'selection',
-        KeyH: 'paragraph',
-        KeyI: 'input',
-        KeyT: 'open',
-        KeyU: 'undo',
-      } as const
-    )[event.code as 'KeyS'];
-    if (!action) return;
+    const action = KEY_ACTIONS[event.code];
+    if (!action || (!enabled && action !== 'undo' && action !== 'open')) return;
     event.preventDefault();
     // Keyboard actions target the focused field, not an old context menu target.
     contextTarget = null;
@@ -356,17 +427,21 @@ export function createTextTools({
   document.addEventListener('selectionchange', onSelection);
   document.addEventListener('keydown', onKey);
   source.addEventListener('input', () => {
+    paragraph = undefined;
+    selectionContext = undefined;
     cancelRequest();
     translatedText = undefined;
     apply.disabled = true;
     output.replaceChildren();
   });
-  language.addEventListener('input', () => {
+  const onLanguageChange = () => {
     cancelRequest();
     translatedText = undefined;
     apply.disabled = true;
     output.replaceChildren();
-  });
+  };
+  language.addEventListener('input', onLanguageChange);
+  sourceLanguage.addEventListener('input', onLanguageChange);
 
   return {
     execute,
@@ -378,14 +453,33 @@ export function createTextTools({
       if (label.firstChild) label.firstChild.textContent = t('tools.source');
       if (languageLabel.firstChild)
         languageLabel.firstChild.textContent = t('tools.target');
+      if (sourceLanguageLabel.firstChild)
+        sourceLanguageLabel.firstChild.textContent = t('tools.sourceLanguage');
       help.textContent = t('tools.shortcuts');
-      cancelRequest();
-      translatedText = undefined;
-      apply.disabled = true;
+      const nextKey = JSON.stringify([
+        settings.enabled,
+        settings.activeProviderProfileId,
+        settings.providerProfiles,
+        settings.fallbackProviderProfileIds,
+        settings.translationQuality,
+        settings.siteGlossaries,
+        settings.targetLanguage,
+      ]);
+      if (nextKey !== translationSettingsKey) {
+        cancelRequest();
+        translatedText = undefined;
+        apply.disabled = true;
+        output.replaceChildren();
+        translationSettingsKey = nextKey;
+      }
+      if (defaultTargetLanguage !== settings.targetLanguage) {
+        language.value = settings.targetLanguage;
+        defaultTargetLanguage = settings.targetLanguage;
+      }
+      if (translate.disabled) status.textContent = t('tools.translating');
       host.dataset.theme = settings.theme;
       enabled = settings.enabled;
       selectionButtonEnabled = settings.selectionButtonEnabled;
-      language.value = settings.targetLanguage;
       const profile = settings.providerProfiles.find(
         (item) => item.id === settings.activeProviderProfileId,
       );

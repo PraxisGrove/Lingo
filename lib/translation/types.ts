@@ -8,6 +8,7 @@ export type TranslationRequest = {
   sessionId: string;
   pageRevision: number;
   sourceLanguage: string;
+  sourceLanguageOverride?: string;
   targetLanguage: string;
   pageTitle?: string;
   siteHostname?: string;

@@ -200,5 +200,7 @@
   "rules.subscription.failed": "No se pudo actualizar. Se conservan las últimas reglas verificadas.",
   "rules.subscription.help": "Indique un paquete HTTPS de confianza y la clave pública del editor. Se aplica en la próxima traducción.",
   "rules.subscription.disabled": "Las actualizaciones comunitarias están desactivadas.",
-  "tools.protected": "Las reglas del sitio excluyen este contenido."
+  "tools.protected": "El contenido cambió, está protegido o excluido. Selecciónelo otra vez.",
+  "tools.sourceLanguage": "Idioma de origen (auto: detectar)",
+  "tools.detect": "Detectar automáticamente"
 }

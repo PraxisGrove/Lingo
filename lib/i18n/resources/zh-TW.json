@@ -200,5 +200,7 @@
   "rules.subscription.failed": "規則更新失敗，保留上次驗證通過的規則。",
   "rules.subscription.help": "訂閱可信的 HTTPS 規則套件，公鑰由發布者提供。新規則在下次翻譯工作階段生效。",
   "rules.subscription.disabled": "社群規則更新已關閉。",
-  "tools.protected": "此內容已被網站規則排除。"
+  "tools.protected": "內容已變更、受保護或被排除，請重新選取。",
+  "tools.sourceLanguage": "來源語言（auto 自動偵測）",
+  "tools.detect": "自動偵測"
 }

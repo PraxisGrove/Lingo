@@ -10,6 +10,67 @@ import {
 import { resolveTranslationQuality } from './quality';
 
 describe('TranslationOrchestrator', () => {
+  it('retries only unfinished pieces of a long paragraph', async () => {
+    const sent: string[] = [];
+    let failed = false;
+    const configured = provider(async ({ units }) => {
+      sent.push(units[0].text);
+      if (units[0].text.startsWith('Cccc') && !failed) {
+        failed = true;
+        throw Object.assign(new Error('Temporary network error'), {
+          category: 'network',
+        });
+      }
+      return units;
+    });
+    configured.capabilities.maxBatchCharacters = 6;
+    const orchestrator = createTranslationOrchestrator(configured, {
+      maxAttempts: 2,
+      minRequestIntervalMs: 0,
+      wait: async () => {},
+    });
+    const events = [];
+    for await (const event of orchestrator.translate({
+      sessionId: 'long-retry',
+      pageRevision: 0,
+      sourceLanguage: 'auto',
+      targetLanguage: 'zh-CN',
+      units: [{ id: 'p', number: 1, text: 'Aaaa. Bbbb. Cccc. Dddd.' }],
+    }))
+      events.push(event);
+    expect(sent).toEqual(['Aaaa. ', 'Bbbb. ', 'Cccc. ', 'Cccc. ', 'Dddd.']);
+    expect(events.find((event) => event.type === 'translated')).toMatchObject({
+      text: 'Aaaa. Bbbb. Cccc. Dddd.',
+    });
+  });
+
+  it('uses an explicit text source override while keeping the global page default', async () => {
+    const translate = vi.fn(async ({ units }: ProviderBatchInput) => units);
+    const savedSource = vi.fn(async () => 'en');
+    const orchestrator = createTranslationOrchestrator(provider(translate), {
+      sourceLanguage: savedSource,
+      minRequestIntervalMs: 0,
+    });
+    for await (const _event of orchestrator.translate({
+      sessionId: 'text-source',
+      pageRevision: 0,
+      sourceLanguage: 'auto',
+      sourceLanguageOverride: 'auto',
+      targetLanguage: 'en',
+      units: [{ id: 'text', number: 1, text: '你好' }],
+    })) {
+      /* Drain the stream. */
+    }
+    expect(translate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sourceLanguage: 'auto' }),
+    );
+    expect(savedSource).not.toHaveBeenCalled();
+    await collect(orchestrator);
+    expect(translate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sourceLanguage: 'en' }),
+    );
+  });
+
   it('splits long pages and oversized paragraphs within the character budget', async () => {
     const batches: string[][] = [];
     const configured = provider(async (input) => {

@@ -200,5 +200,7 @@
   "rules.subscription.failed": "Falha na atualização. As últimas regras verificadas foram mantidas.",
   "rules.subscription.help": "Informe um pacote HTTPS confiável e a chave pública do autor. Será aplicado na próxima tradução.",
   "rules.subscription.disabled": "As atualizações da comunidade estão desativadas.",
-  "tools.protected": "Este conteúdo foi excluído pelas regras do site."
+  "tools.protected": "O conteúdo mudou, está protegido ou excluído. Selecione novamente.",
+  "tools.sourceLanguage": "Idioma de origem (auto: detectar)",
+  "tools.detect": "Detectar automaticamente"
 }

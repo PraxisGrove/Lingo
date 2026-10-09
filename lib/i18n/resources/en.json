@@ -201,5 +201,7 @@
   "rules.subscription.failed": "Rules could not be updated. The last verified rules are retained.",
   "rules.subscription.help": "Subscribe to a trusted HTTPS rule package. The public key comes from its publisher. Changes apply on the next translation session.",
   "rules.subscription.disabled": "Community updates are disabled.",
-  "tools.protected": "This content is excluded by the site rules."
+  "tools.protected": "This content changed, is protected, or is excluded. Select it again.",
+  "tools.sourceLanguage": "Source language (auto detects)",
+  "tools.detect": "Detect automatically"
 }

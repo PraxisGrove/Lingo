@@ -200,5 +200,7 @@
   "rules.subscription.failed": "规则更新失败，保留上次校验通过的规则。",
   "rules.subscription.help": "订阅可信的 HTTPS 规则包，公钥由发布者提供。新规则在下次翻译会话生效。",
   "rules.subscription.disabled": "社区规则更新已关闭。",
-  "tools.protected": "此内容已被站点规则排除。"
+  "tools.protected": "内容已变化、受保护或被排除，请重新选择。",
+  "tools.sourceLanguage": "源语言（auto 自动检测）",
+  "tools.detect": "自动检测"
 }

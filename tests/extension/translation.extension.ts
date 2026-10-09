@@ -33,7 +33,12 @@ let control: Page;
 let blockNext = false;
 let blockedText: string | undefined;
 let release: (() => void) | undefined;
-const requests: Array<{ texts: string[]; source: string; path: string }> = [];
+const requests: Array<{
+  texts: string[];
+  source?: string;
+  target: string;
+  path: string;
+}> = [];
 const credential = 'local-contract-credential';
 let articleHtml = '';
 
@@ -44,11 +49,13 @@ describe('installed Chromium extension translation', () => {
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const body = JSON.parse(Buffer.concat(chunks).toString()) as {
         q: string[];
-        source: string;
+        source?: string;
+        target: string;
       };
       requests.push({
         texts: body.q,
         source: body.source,
+        target: body.target,
         path: request.url ?? '',
       });
       if (blockNext || body.q.includes(blockedText ?? '\u0000')) {
@@ -88,6 +95,7 @@ describe('installed Chromium extension translation', () => {
         `--load-extension=${extensionPath}`,
       ],
     });
+    context.setDefaultTimeout(10_000);
     const worker =
       context.serviceWorkers()[0] ??
       (await context.waitForEvent('serviceworker'));
@@ -252,6 +260,24 @@ describe('installed Chromium extension translation', () => {
       .getByRole('button', { name: 'Translate', exact: true })
       .click();
     await expectTextOutput(translator, 'Translated: Independent text.');
+    expect(requests.at(-1)?.source).toBeUndefined();
+    await translator
+      .getByRole('combobox', {
+        name: 'Source language (auto detects)',
+        exact: true,
+      })
+      .fill('ja');
+    await translator
+      .getByRole('textbox', { name: 'Original text', exact: true })
+      .fill('Literal ⟦KEEP:2⟧ and ⟦1⟧ text.');
+    await translator
+      .getByRole('button', { name: 'Translate', exact: true })
+      .click();
+    await expectTextOutput(
+      translator,
+      'Translated: Literal ⟦KEEP:2⟧ and ⟦1⟧ text.',
+    );
+    expect(requests.at(-1)?.source).toBe('ja');
     await translator.screenshot({
       path: '.vitest-attachments/text-translation.png',
       fullPage: true,
@@ -260,7 +286,7 @@ describe('installed Chromium extension translation', () => {
 
   it('translates open shadow components, preserves code, and restores their original DOM', async () => {
     articleHtml =
-      '<main class="story"><div id="component"></div><div id="excluded" translate="no"></div></main>';
+      '<main class="story"><div id="component"><p>Unassigned light sentinel.</p></div><div id="excluded" translate="no"></div></main>';
     const article = await openArticle();
     await article.evaluate(() => {
       (document.getElementById('component') as HTMLElement).attachShadow({
@@ -285,6 +311,7 @@ describe('installed Chromium extension translation', () => {
     const sent = requests.flatMap((request) => request.texts).join('');
     expect(sent).not.toContain('shadow-code-sentinel');
     expect(sent).not.toContain('Private shadow sentinel');
+    expect(sent).not.toContain('Unassigned light sentinel');
     await clickPopup(popup, 'Restore original');
     await vi.waitFor(async () =>
       expect(
@@ -296,6 +323,32 @@ describe('installed Chromium extension translation', () => {
         () => document.getElementById('component')?.shadowRoot?.innerHTML,
       ),
     ).toBe('<p>Read <code>shadow-code-sentinel</code> safely.</p>');
+  });
+
+  it('retranslates the active page after changing its target language', async () => {
+    articleHtml = '<main class="story"><p>Language switch.</p></main>';
+    const article = await openArticle();
+    const popup = await openPopup(article);
+    await clickPopup(popup, 'Translate page');
+    await vi.waitFor(async () =>
+      expect(
+        await article.locator('[data-lingo-translation]').getAttribute('lang'),
+      ).toBe('zh-CN'),
+    );
+    await popup
+      .getByRole('combobox', { name: 'Target language', exact: true })
+      .selectOption('ja');
+    await vi.waitFor(
+      async () =>
+        expect(
+          await article
+            .locator('[data-lingo-translation]')
+            .getAttribute('lang'),
+        ).toBe('ja'),
+      { timeout: 10_000 },
+    );
+    expect(requests.map((request) => request.target)).toEqual(['zh-CN', 'ja']);
+    await clickPopup(popup, 'Restore original');
   });
 
   it('splits an oversized formatted paragraph within service budgets and restores it intact', async () => {

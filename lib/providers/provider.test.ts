@@ -92,6 +92,95 @@ describe.each(cases)('$profile.provider provider contract', ({
 });
 
 describe('provider errors', () => {
+  it('rejects a DeepL glossary with automatic source before sending text', async () => {
+    const fetcher = vi.fn<typeof globalThis.fetch>();
+    const provider = createProvider(
+      { ...cases[1].profile, nativeGlossaryId: 'glossary' },
+      'dummy',
+      fetcher,
+    );
+    await expect(
+      provider.translateBatch({
+        sourceLanguage: 'auto',
+        targetLanguage: 'zh-CN',
+        quality: resolveTranslationQuality(),
+        units: [{ id: '1', number: 1, text: 'Hello' }],
+      }),
+    ).rejects.toMatchObject({
+      category: 'invalid-request',
+      message: 'Choose an explicit source language to use a DeepL glossary.',
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [456, 'quota'],
+    [529, 'rate-limit'],
+  ] as const)('classifies DeepL HTTP %s as %s', async (status, category) => {
+    const fetcher = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response('{}', { status }));
+    await expect(
+      createProvider(cases[1].profile, 'dummy', fetcher).translateBatch({
+        sourceLanguage: 'auto',
+        targetLanguage: 'zh-CN',
+        quality: resolveTranslationQuality(),
+        units: [{ id: '1', number: 1, text: 'Hello' }],
+      }),
+    ).rejects.toMatchObject({ category, status });
+  });
+
+  it.each([
+    ['deepl', 'zh-CN', 'ZH-HANS'],
+    ['deepl', 'zh-TW', 'ZH-HANT'],
+    ['azure-translator', 'zh-CN', 'zh-Hans'],
+    ['azure-translator', 'zh-TW', 'zh-Hant'],
+  ] as const)('maps %s target locale %s to native language %s', async (kind, locale, expected) => {
+    const profile = cases.find(
+      (item) => item.profile.provider === kind,
+    )?.profile;
+    if (!profile) throw new Error('Missing provider profile');
+    const response =
+      kind === 'deepl'
+        ? { translations: [{ text: '译文' }] }
+        : [{ translations: [{ text: '译文' }] }];
+    const fetcher = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response(JSON.stringify(response)));
+    await createProvider(profile, 'dummy', fetcher).translateBatch({
+      sourceLanguage: 'auto',
+      targetLanguage: locale,
+      quality: resolveTranslationQuality(),
+      units: [{ id: '1', number: 1, text: 'Hello' }],
+    });
+    if (kind === 'deepl')
+      expect(
+        JSON.parse(String(fetcher.mock.calls[0][1]?.body)).target_lang,
+      ).toBe(expected);
+    else
+      expect(
+        new URL(String(fetcher.mock.calls[0][0])).searchParams.get('to'),
+      ).toBe(expected);
+  });
+
+  it('uses DeepL base source languages and keeps target variants', async () => {
+    const fetcher = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ translations: [{ text: 'Hello' }] })),
+      );
+    await createProvider(cases[1].profile, 'dummy', fetcher).translateBatch({
+      sourceLanguage: 'zh-TW',
+      targetLanguage: 'en',
+      quality: resolveTranslationQuality(),
+      units: [{ id: '1', number: 1, text: '你好' }],
+    });
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({
+      source_lang: 'ZH',
+      target_lang: 'EN-US',
+    });
+  });
+
   it('repairs fenced structured output and sends glossary constraints to compatible models', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
       new Response(
@@ -175,13 +264,24 @@ describe('provider errors', () => {
     ).rejects.toMatchObject({ category });
   });
 
-  it('rejects insecure remote OpenAI-compatible endpoints', () => {
+  it.each(cases)('rejects insecure remote $profile.provider endpoints', ({
+    profile,
+  }) => {
     expect(() =>
       createProvider(
-        { ...cases[0].profile, endpoint: 'http://remote.example/v1' },
+        { ...profile, endpoint: 'http://remote.example/v1' },
         'secret',
       ),
     ).toThrow(ProviderError);
+  });
+
+  it('classifies malformed native endpoints as configuration errors', () => {
+    expect(() =>
+      createProvider(
+        { ...cases[1].profile, endpoint: 'invalid endpoint' },
+        'dummy',
+      ),
+    ).toThrowError(expect.objectContaining({ category: 'invalid-request' }));
   });
 
   it('tests a connection with fixed text rather than page content', async () => {

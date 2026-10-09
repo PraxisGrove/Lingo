@@ -41,6 +41,7 @@ export type ExtensionMessages = {
   startPageTranslation: {
     request: {
       targetLanguage: string;
+      restart?: boolean;
       displayMode: DisplayMode;
       contentScope?: 'main' | 'main-and-interface';
       translateImmediately?: boolean;
@@ -143,9 +144,11 @@ export function isExtensionMessage(
         isRecordWithRequiredAndOptionalKeys(
           message.payload,
           ['targetLanguage', 'displayMode'],
-          ['contentScope', 'translateImmediately'],
+          ['contentScope', 'translateImmediately', 'restart'],
         ) &&
         typeof message.payload.targetLanguage === 'string' &&
+        (message.payload.restart === undefined ||
+          typeof message.payload.restart === 'boolean') &&
         isDisplayMode(message.payload.displayMode) &&
         (message.payload.contentScope === undefined ||
           ['main', 'main-and-interface'].includes(

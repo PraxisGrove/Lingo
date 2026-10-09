@@ -200,5 +200,7 @@
   "rules.subscription.failed": "Aktualisierung fehlgeschlagen. Die zuletzt geprüften Regeln bleiben erhalten.",
   "rules.subscription.help": "Tragen Sie ein vertrauenswürdiges HTTPS-Paket und den öffentlichen Schlüssel des Herausgebers ein. Gilt ab der nächsten Übersetzung.",
   "rules.subscription.disabled": "Community-Aktualisierungen sind deaktiviert.",
-  "tools.protected": "Dieser Inhalt ist durch die Website-Regeln ausgeschlossen."
+  "tools.protected": "Der Inhalt wurde geändert, ist geschützt oder ausgeschlossen. Wählen Sie ihn erneut aus.",
+  "tools.sourceLanguage": "Ausgangssprache (auto: Erkennung)",
+  "tools.detect": "Automatisch erkennen"
 }

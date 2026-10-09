@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { preservesInlineMarkers } from './inline-markers';
+import {
+  preservesInlineMarkers,
+  protectLiteralMarkers,
+} from './inline-markers';
 
 describe('translation inline marker integrity', () => {
+  it('restores literal tokens in one pass without interpreting restored text again', () => {
+    const source = 'Literal ⟦KEEP:2⟧ ⟦KEEP:1⟧ ⟦1⟧unpaired syntax.';
+    const protectedText = protectLiteralMarkers(source);
+    expect(preservesInlineMarkers(protectedText.text, protectedText.text)).toBe(
+      true,
+    );
+    expect(protectedText.restore(protectedText.text)).toBe(source);
+  });
+
   it.each([
     [
       'Read ⟦1⟧the guide⟦/1⟧ and ⟦KEEP:2⟧.',

@@ -77,10 +77,17 @@ export function createTranslationOrchestrator(
       const controller = new AbortController();
       activeSessions.set(request.sessionId, controller);
       try {
-        if (options.sourceLanguage) {
+        if (
+          options.sourceLanguage ||
+          request.sourceLanguageOverride !== undefined
+        ) {
           request = {
             ...request,
-            sourceLanguage: await options.sourceLanguage(),
+            sourceLanguage:
+              request.sourceLanguageOverride ??
+              (options.sourceLanguage
+                ? await options.sourceLanguage()
+                : request.sourceLanguage),
           };
         }
         if (controller.signal.aborted) return;
@@ -416,6 +423,20 @@ async function attemptBatch(
   providerIndex: number | undefined,
   execute: ReturnType<typeof createRequestControl>,
 ): Promise<ProviderBatchResult> {
+  const budget =
+    provider.capabilities.maxBatchCharacters ?? Number.POSITIVE_INFINITY;
+  const pieces = units.map((unit) => splitLongUnit(unit, budget));
+  const allParts = pieces.flatMap((parts) => parts.map((part) => part.unit));
+  const batches = split(
+    allParts.filter((part) => part.text.trim()),
+    normalizedBatchSize(provider.capabilities.maxBatchSize),
+    budget,
+  );
+  const found = new Map(
+    allParts
+      .filter((part) => !part.text.trim())
+      .map((part) => [part.id, part.text]),
+  );
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     signal.throwIfAborted();
@@ -423,23 +444,9 @@ async function attemptBatch(
     const onAbort = () => attemptController.abort(signal.reason);
     signal.addEventListener('abort', onAbort, { once: true });
     try {
-      const budget =
-        provider.capabilities.maxBatchCharacters ?? Number.POSITIVE_INFINITY;
-      const pieces = units.map((unit) => splitLongUnit(unit, budget));
-      const allParts = pieces.flatMap((parts) =>
-        parts.map((part) => part.unit),
-      );
-      const batches = split(
-        allParts.filter((part) => part.text.trim()),
-        normalizedBatchSize(provider.capabilities.maxBatchSize),
-        budget,
-      );
-      const found = new Map(
-        allParts
-          .filter((part) => !part.text.trim())
-          .map((part) => [part.id, part.text]),
-      );
-      for (const batch of batches) {
+      for (const completeBatch of batches) {
+        const batch = completeBatch.filter((unit) => !found.has(unit.id));
+        if (batch.length === 0) continue;
         const input: ProviderBatchInput = {
           signal: attemptController.signal,
           sourceLanguage: request.sourceLanguage,

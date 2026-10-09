@@ -54,7 +54,7 @@ export function createProvider(
       'A provider credential is required.',
     );
   const endpoint = resolveEndpoint(profile);
-  if (profile.provider === 'openai-compatible') validateEndpoint(endpoint);
+  validateEndpoint(endpoint);
   const definition = PROVIDER_DEFINITIONS.find(
     (item) => item.value === profile.provider,
   );
@@ -107,7 +107,7 @@ async function translate(
       'The translation service could not be reached.',
     );
   }
-  if (!response.ok) throw errorForStatus(response.status);
+  if (!response.ok) throw errorForStatus(response.status, profile.provider);
   let data: unknown;
   try {
     data = await response.json();
@@ -152,14 +152,29 @@ function buildRequest(
       };
       break;
     case 'deepl':
+      if (profile.nativeGlossaryId && input.sourceLanguage === 'auto')
+        throw new ProviderError(
+          'invalid-request',
+          'Choose an explicit source language to use a DeepL glossary.',
+        );
       url = `${endpoint.replace(/\/$/, '')}/v2/translate`;
       headers.authorization = `DeepL-Auth-Key ${credential}`;
       body = {
         text: input.units.map((unit) => unit.text),
-        target_lang: input.targetLanguage,
+        target_lang: nativeLanguage(
+          profile.provider,
+          input.targetLanguage,
+          'target',
+        ),
         ...(input.sourceLanguage === 'auto'
           ? {}
-          : { source_lang: input.sourceLanguage }),
+          : {
+              source_lang: nativeLanguage(
+                profile.provider,
+                input.sourceLanguage,
+                'source',
+              ),
+            }),
         ...(profile.nativeGlossaryId
           ? { glossary_id: profile.nativeGlossaryId }
           : {}),
@@ -177,7 +192,7 @@ function buildRequest(
       };
       break;
     case 'azure-translator':
-      url = `${endpoint.replace(/\/$/, '')}/translate?api-version=3.0&to=${encodeURIComponent(input.targetLanguage)}${input.sourceLanguage === 'auto' ? '' : `&from=${encodeURIComponent(input.sourceLanguage)}`}`;
+      url = `${endpoint.replace(/\/$/, '')}/translate?api-version=3.0&to=${encodeURIComponent(nativeLanguage(profile.provider, input.targetLanguage, 'target'))}${input.sourceLanguage === 'auto' ? '' : `&from=${encodeURIComponent(nativeLanguage(profile.provider, input.sourceLanguage, 'source'))}`}`;
       headers['ocp-apim-subscription-key'] = credential;
       if (profile.region)
         headers['ocp-apim-subscription-region'] = profile.region;
@@ -192,6 +207,50 @@ function buildRequest(
       signal: input.signal,
     },
   };
+}
+
+// UI preferences use locale codes; native MT APIs require their own language
+// identifiers. Keep the user's locale and cache identity unchanged.
+function nativeLanguage(
+  kind: ProviderProfile['provider'],
+  language: string,
+  role: 'source' | 'target',
+): string {
+  const code = language.toLowerCase();
+  if (kind === 'deepl') {
+    if (role === 'source') {
+      if (/^zh(?:-|$)/.test(code)) return 'ZH';
+      if (/^en(?:-|$)/.test(code)) return 'EN';
+      if (/^pt(?:-|$)/.test(code)) return 'PT';
+    }
+    return (
+      (
+        {
+          'zh-cn': 'ZH-HANS',
+          'zh-sg': 'ZH-HANS',
+          'zh-tw': 'ZH-HANT',
+          'zh-hk': 'ZH-HANT',
+          en: 'EN-US',
+          pt: 'PT-BR',
+        } as Record<string, string>
+      )[code] ?? language.toUpperCase()
+    );
+  }
+  if (kind === 'azure-translator') {
+    return (
+      (
+        {
+          'zh-cn': 'zh-Hans',
+          'zh-sg': 'zh-Hans',
+          'zh-tw': 'zh-Hant',
+          'zh-hk': 'zh-Hant',
+          'en-us': 'en',
+          'en-gb': 'en',
+        } as Record<string, string>
+      )[code] ?? language
+    );
+  }
+  return language;
 }
 
 function parseResponse(
@@ -306,7 +365,15 @@ function resolveEndpoint(profile: ProviderProfile): string {
 }
 
 function validateEndpoint(endpoint: string): void {
-  const url = new URL(endpoint);
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new ProviderError(
+      'invalid-request',
+      'A valid service endpoint URL is required.',
+    );
+  }
   if (url.protocol === 'https:') return;
   if (
     url.protocol === 'http:' &&
@@ -319,13 +386,16 @@ function validateEndpoint(endpoint: string): void {
   );
 }
 
-function errorForStatus(status: number): ProviderError {
+function errorForStatus(
+  status: number,
+  kind: ProviderProfile['provider'],
+): ProviderError {
   const category: ProviderErrorCategory =
     status === 401 || status === 403
       ? 'authentication'
-      : status === 402
+      : status === 402 || (kind === 'deepl' && status === 456)
         ? 'quota'
-        : status === 429
+        : status === 429 || (kind === 'deepl' && status === 529)
           ? 'rate-limit'
           : status >= 500
             ? 'unavailable'

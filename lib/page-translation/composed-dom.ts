@@ -51,3 +51,30 @@ export function composedContains(parent: Element, child: Element): boolean {
   }
   return false;
 }
+
+export function isComposedVisible(element: Element): boolean {
+  const view = element.ownerDocument.defaultView;
+  if (!view) return true;
+  let current: Element | null = element;
+  while (current) {
+    if (
+      current.parentElement instanceof HTMLSlotElement &&
+      current.parentElement.assignedNodes().length > 0
+    )
+      return false;
+    if (current.parentElement?.shadowRoot && !current.assignedSlot)
+      return false;
+    const style = view.getComputedStyle(current);
+    if (
+      style.opacity === '0' ||
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.visibility === 'collapse' ||
+      style.getPropertyValue('content-visibility') === 'hidden'
+    ) {
+      return false;
+    }
+    current = composedParent(current);
+  }
+  return true;
+}

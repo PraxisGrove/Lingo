@@ -1,3 +1,22 @@
+/** Keep source literals separate from the protocol's formatting markers. */
+export function protectLiteralMarkers(source: string) {
+  const literals = new Map<string, string>();
+  const text = source.replace(/⟦(?:\/?\d+|KEEP:\d+)⟧/g, (literal) => {
+    const id = String(literals.size + 1);
+    literals.set(id, literal);
+    return `⟦KEEP:${id}⟧`;
+  });
+  return {
+    text,
+    restore(translated: string) {
+      return translated.replace(
+        /⟦KEEP:(\d+)⟧/g,
+        (marker, id: string) => literals.get(id) ?? marker,
+      );
+    },
+  };
+}
+
 export function preservesInlineMarkers(
   source: string,
   translated: string,
