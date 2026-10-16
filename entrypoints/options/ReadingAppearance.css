@@ -1,0 +1,205 @@
+.reading-appearance {
+  border-block-start: 1px solid var(--border, #e3e4e1);
+  margin-block-start: 24px;
+  padding-block-start: 24px;
+}
+
+.reading-appearance-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-block-end: 20px;
+}
+
+.reading-appearance-heading h2 {
+  font-size: 16px;
+  font-weight: 650;
+  margin: 0 0 6px;
+}
+
+.reading-appearance-heading p,
+.reading-appearance-saved-hint {
+  color: var(--muted, #71756f);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.reading-appearance-reset {
+  background: transparent;
+  border: 1px solid var(--border, #e3e4e1);
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+
+.reading-appearance-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px 28px;
+}
+
+.reading-appearance-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.reading-appearance-fields label > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.reading-appearance-fields output {
+  color: var(--muted, #71756f);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.reading-appearance-fields select {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #d9dbd6);
+  border-radius: 5px;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  height: 36px;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.reading-appearance-fields input[type="range"] {
+  accent-color: var(--text, #242924);
+  cursor: pointer;
+  margin: 8px 0;
+  width: 100%;
+}
+
+.reading-appearance-fields input[type="range"]:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.reading-appearance-fields .reading-appearance-checkbox {
+  align-items: center;
+  flex-direction: row;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.reading-appearance-checkbox input {
+  accent-color: var(--text, #242924);
+  margin: 0;
+}
+
+.reading-appearance-fields .reading-appearance-color-picker {
+  align-items: center;
+  flex-direction: row;
+  margin-block-start: 8px;
+}
+
+.reading-appearance-color-picker input {
+  background: transparent;
+  border: 0;
+  height: 28px;
+  padding: 0;
+  width: 32px;
+}
+
+.reading-appearance-fields .reading-appearance-color-picker span {
+  color: var(--muted, #71756f);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.reading-appearance-preview-heading {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  justify-content: space-between;
+  margin-block: 24px 10px;
+}
+
+.reading-appearance-preview-theme {
+  border: 0;
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.reading-appearance-preview-theme button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted, #71756f);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.reading-appearance-preview-theme button[aria-pressed="true"] {
+  border-color: var(--border, #d9dbd6);
+  color: inherit;
+}
+
+.reading-appearance-preview {
+  background: #fff;
+  border: 1px solid var(--border, #e3e4e1);
+  border-radius: 6px;
+  color: #2e3430;
+  font-family: Georgia, "Noto Serif", serif;
+  font-size: 16px;
+  line-height: 1.65;
+  padding: 24px;
+}
+
+.reading-appearance-preview[data-preview-theme="dark"] {
+  background: #202422;
+  border-color: #353b37;
+  color: #e5e7e2;
+}
+
+.reading-appearance-preview h3 {
+  color: inherit;
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0 0 14px;
+}
+
+.reading-appearance-preview p {
+  margin: 0 0 14px;
+}
+
+.reading-appearance-preview p:last-child {
+  margin-block-end: 0;
+}
+
+.reading-appearance-saved-hint {
+  font-size: 12px;
+  margin-block-start: 10px;
+}
+
+@media (max-width: 540px) {
+  .reading-appearance-fields {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .reading-appearance-preview {
+    padding: 18px;
+  }
+}

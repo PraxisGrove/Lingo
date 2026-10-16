@@ -13,7 +13,12 @@ import {
 import { DEFAULT_SETTINGS } from '../../lib/storage/settings-model';
 
 declare const chrome: {
-  storage: { local: { set(value: Record<string, unknown>): Promise<void> } };
+  storage: {
+    local: {
+      set(value: Record<string, unknown>): Promise<void>;
+      get(key: string): Promise<Record<string, unknown>>;
+    };
+  };
   runtime: { sendMessage(message: unknown): Promise<unknown> };
   tabs: {
     query(query: Record<string, unknown>): Promise<Array<{ id: number }>>;
@@ -190,7 +195,7 @@ describe('installed Chromium extension translation', () => {
     expect(sent).not.toContain('Private sentinel');
     expect(sent).not.toContain('Footer sentinel');
     expect(await article.content()).not.toContain(credential);
-    await clickPopup(popup, 'Restore original');
+    await clickPopup(popup, 'Stop translation');
     await vi.waitFor(async () =>
       expect(await article.locator('[data-lingo-translation]').count()).toBe(0),
     );
@@ -205,6 +210,66 @@ describe('installed Chromium extension translation', () => {
           .count(),
       ).toBe(0),
     );
+  });
+
+  it('updates existing webpage and iframe typography without making more translation requests', async () => {
+    articleHtml =
+      '<main class="story"><p>Read this paragraph alongside its translation.</p><iframe src="https://reading.test/frame"></iframe></main>';
+    const article = await openArticle();
+    const popup = await openPopup(article);
+    await clickPopup(popup, 'Translate page');
+    const paragraph = article.locator('main > [data-lingo-translation]');
+    const frameParagraph = article
+      .frameLocator('iframe')
+      .locator('[data-lingo-translation]');
+    await vi.waitFor(async () => {
+      expect(await paragraph.count()).toBe(1);
+      expect(await frameParagraph.count()).toBe(1);
+    });
+    const requestCount = requests.length;
+    const appearance = {
+      ...DEFAULT_SETTINGS.translationAppearance,
+      fontScale: 1.2,
+      lineHeight: 1.8,
+      color: '#226688',
+      paragraphGap: 0.55,
+      separator: 'dashed',
+    };
+    await control.evaluate(async (appearance) => {
+      const { settings } = await chrome.storage.local.get('settings');
+      await chrome.storage.local.set({
+        settings: {
+          ...(settings as Record<string, unknown>),
+          translationAppearance: appearance,
+        },
+      });
+    }, appearance);
+    for (const translation of [paragraph, frameParagraph]) {
+      await vi.waitFor(async () => {
+        const typography = await translation.evaluate((element) => {
+          const computed = getComputedStyle(element);
+          return {
+            size: computed.fontSize,
+            color: computed.color,
+            lineHeight: computed.lineHeight,
+            separator: computed.borderTopStyle,
+          };
+        });
+        expect(typography.size).toBe('19.2px');
+        expect(typography.color).toBe('rgb(34, 102, 136)');
+        expect(Number.parseFloat(typography.lineHeight)).toBeCloseTo(34.56, 1);
+        expect(typography.separator).toBe('dashed');
+      });
+    }
+    // Allow the page mutation debounce to run before asserting no API work.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(requests).toHaveLength(requestCount);
+    await article.bringToFront();
+    await clickPopup(popup, 'Stop translation');
+    await vi.waitFor(async () => {
+      expect(await paragraph.count()).toBe(0);
+      expect(await frameParagraph.count()).toBe(0);
+    });
   });
 
   it('translates selections and input only on request, confirms writes, and opens the standalone window', async () => {
@@ -247,6 +312,7 @@ describe('installed Chromium extension translation', () => {
       'password-sentinel',
     );
     const popup = await openPopup(article);
+    await popup.locator('.page-preferences > summary').click();
     const newTab = context.waitForEvent('page');
     await clickPopup(popup, 'Open text translation');
     const translator = await newTab;
@@ -312,7 +378,7 @@ describe('installed Chromium extension translation', () => {
     expect(sent).not.toContain('shadow-code-sentinel');
     expect(sent).not.toContain('Private shadow sentinel');
     expect(sent).not.toContain('Unassigned light sentinel');
-    await clickPopup(popup, 'Restore original');
+    await clickPopup(popup, 'Stop translation');
     await vi.waitFor(async () =>
       expect(
         await article.locator('#component [data-lingo-translation]').count(),
@@ -348,7 +414,7 @@ describe('installed Chromium extension translation', () => {
       { timeout: 10_000 },
     );
     expect(requests.map((request) => request.target)).toEqual(['zh-CN', 'ja']);
-    await clickPopup(popup, 'Restore original');
+    await clickPopup(popup, 'Stop translation');
   });
 
   it('splits an oversized formatted paragraph within service budgets and restores it intact', async () => {
@@ -378,7 +444,7 @@ describe('installed Chromium extension translation', () => {
     expect(
       await article.locator('[data-lingo-translation] code').textContent(),
     ).toBe('long-code-sentinel');
-    await clickPopup(popup, 'Restore original');
+    await clickPopup(popup, 'Stop translation');
     await vi.waitFor(async () =>
       expect(await article.locator('main').innerHTML()).toBe(before),
     );
@@ -391,7 +457,7 @@ describe('installed Chromium extension translation', () => {
     blockNext = true;
     await clickPopup(popup, 'Translate page');
     await vi.waitFor(() => expect(requests.length).toBeGreaterThan(0));
-    await clickPopup(popup, 'Restore original');
+    await clickPopup(popup, 'Stop translation');
     release?.();
     await vi.waitFor(async () =>
       expect(await article.locator('[data-lingo-translation]').count()).toBe(0),
@@ -423,9 +489,11 @@ describe('installed Chromium extension translation', () => {
         await article.locator('[data-lingo-translation]').allTextContents(),
       ).toEqual(['Translated: Updated route paragraph.']),
     );
-    await clickPopup(popup, 'Restore original');
-    expect(await article.locator('main').textContent()).toBe(
-      'Updated route paragraph.',
+    await clickPopup(popup, 'Stop translation');
+    await vi.waitFor(async () =>
+      expect(await article.locator('main').textContent()).toBe(
+        'Updated route paragraph.',
+      ),
     );
   });
 
@@ -465,7 +533,7 @@ describe('installed Chromium extension translation', () => {
         ),
       { timeout: 10_000 },
     );
-    await clickPopup(popup, 'Restore original');
+    await clickPopup(popup, 'Stop translation');
     await vi.waitFor(async () =>
       expect(await article.locator('[data-lingo-translation]').count()).toBe(0),
     );
@@ -496,7 +564,7 @@ describe('installed Chromium extension translation', () => {
         await article.locator('[data-lingo-translation]').allTextContents(),
       ).toEqual(['Translated: Restored page paragraph.']),
     );
-    await clickPopup(popup, 'Restore original');
+    await clickPopup(popup, 'Stop translation');
   });
 
   it('reconnects an unfinished request after the background worker is stopped', async () => {
@@ -537,7 +605,7 @@ describe('installed Chromium extension translation', () => {
     expect(requests).toHaveLength(2);
     expect((await snapshot()).status).toBe('translated');
     await cdp.detach();
-    await clickPopup(popup, 'Restore original');
+    await clickPopup(popup, 'Stop translation');
   });
 });
 

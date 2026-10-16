@@ -9,6 +9,7 @@ import { createFloatingPageControl } from './floating-page-control';
 
 function pageTranslation(): PageTranslation {
   return {
+    updateAppearance: vi.fn(),
     start: vi.fn<PageTranslation['start']>(async () => ({
       status: 'translating',
       displayMode: 'bilingual',

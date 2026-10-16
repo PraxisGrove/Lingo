@@ -7,6 +7,37 @@ import {
 } from './settings-model';
 
 describe('resolveSettings', () => {
+  it('migrates schema 12 without losing protocols, models, icons or reading preferences', () => {
+    const previous = {
+      ...DEFAULT_SETTINGS,
+      schemaVersion: 12,
+      uiLocale: 'zh-CN',
+      targetLanguage: 'ja',
+      setupCompleted: true,
+      translationCacheEnabled: false,
+      floatingButtonEnabled: true,
+      activeProviderProfileId: 'local',
+      providerProfiles: [
+        {
+          id: 'local',
+          name: 'Magpie',
+          provider: 'openai-responses',
+          endpoint: 'http://127.0.0.1:3425/v1',
+          model: 'group/reading',
+          models: [{ id: 'group/reading', name: 'Reading' }],
+          modelSelection: 'manual',
+          icon: { type: 'provider', providerId: 'deepseek' },
+        },
+      ],
+    };
+    expect(
+      resolveSettings({ ...previous, translationAppearance: undefined }),
+    ).toEqual({
+      ...previous,
+      schemaVersion: 13,
+    });
+  });
+
   it('returns defaults for empty values', () => {
     expect(resolveSettings(null)).toEqual(DEFAULT_SETTINGS);
   });
@@ -74,12 +105,12 @@ describe('resolveSettings', () => {
   });
 
   it.each([
-    1, 2, 3, 4, 5, 6, 7, 8,
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
   ])('migrates schema %s without changing the translation target', (schemaVersion) => {
     expect(
       resolveSettings({ schemaVersion, targetLanguage: 'ja' }),
     ).toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: 13,
       targetLanguage: 'ja',
       uiLocale: 'auto',
     });
@@ -92,6 +123,208 @@ describe('resolveSettings', () => {
     expect(resolveSettings({ uiLocale: 'it' })).toMatchObject({
       uiLocale: 'auto',
     });
+  });
+
+  it('migrates schema 9 profiles without changing the concrete selected model', () => {
+    const profile = {
+      id: 'saved',
+      name: 'Personal',
+      provider: 'openai-compatible',
+      model: 'personal-model',
+    };
+    expect(
+      resolveSettings({
+        schemaVersion: 9,
+        providerProfiles: [profile],
+        activeProviderProfileId: profile.id,
+        fallbackProviderProfileIds: [],
+      }),
+    ).toMatchObject({
+      schemaVersion: 13,
+      providerProfiles: [profile],
+      activeProviderProfileId: profile.id,
+    });
+  });
+
+  it('keeps native providers, model selections and sanitized catalog snapshots', () => {
+    expect(
+      resolveSettings({
+        providerProfiles: [
+          {
+            id: 'native',
+            name: 'Claude',
+            provider: 'anthropic',
+            model: 'claude-chosen',
+            modelSelection: 'manual',
+            models: [
+              { id: 'claude-chosen', name: 'Claude chosen' },
+              { id: 'claude-chosen', name: 'Duplicate' },
+              { id: '', name: 'Invalid' },
+              { id: 'claude-alt', name: 'Alt\u0000 name' },
+            ],
+          },
+          {
+            id: 'gemini',
+            name: 'Gemini',
+            provider: 'gemini',
+            modelSelection: 'invented',
+            models: 'invalid',
+          },
+        ],
+      }),
+    ).toMatchObject({
+      providerProfiles: [
+        {
+          id: 'native',
+          provider: 'anthropic',
+          model: 'claude-chosen',
+          modelSelection: 'manual',
+          models: [
+            { id: 'claude-chosen', name: 'Claude chosen' },
+            { id: 'claude-alt', name: 'Alt name' },
+          ],
+        },
+        { id: 'gemini', provider: 'gemini' },
+      ],
+    });
+    const invalid = resolveSettings({
+      providerProfiles: [
+        {
+          id: 'x',
+          name: 'X',
+          provider: 'gemini',
+          modelSelection: 'invented',
+          models: 'invalid',
+        },
+      ],
+    }).providerProfiles[0];
+    expect(invalid).not.toHaveProperty('modelSelection');
+    expect(invalid).not.toHaveProperty('models');
+  });
+
+  it('migrates schema 10 profiles without changing models or automatic icon selection', () => {
+    const profile = {
+      id: 'saved',
+      name: 'Reading',
+      provider: 'gemini',
+      model: 'gemini-chosen',
+      models: [{ id: 'gemini-chosen', name: 'Chosen model' }],
+      modelSelection: 'manual',
+    };
+    const migrated = resolveSettings({
+      schemaVersion: 10,
+      providerProfiles: [profile],
+      activeProviderProfileId: profile.id,
+    });
+    expect(migrated.schemaVersion).toBe(13);
+    expect(migrated.providerProfiles).toEqual([profile]);
+    expect(migrated.providerProfiles[0]).not.toHaveProperty('icon');
+  });
+
+  it('migrates schema 11 without changing the existing Chat Completions protocol', () => {
+    const profile = {
+      id: 'deepseek',
+      name: 'DeepSeek',
+      provider: 'openai-compatible',
+      endpoint: 'https://api.deepseek.com',
+      model: 'deepseek-flash',
+      models: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }],
+      modelSelection: 'manual',
+      icon: { type: 'provider', providerId: 'deepseek' },
+    };
+    const migrated = resolveSettings({
+      schemaVersion: 11,
+      providerProfiles: [profile],
+      activeProviderProfileId: profile.id,
+      uiLocale: 'zh-CN',
+      setupCompleted: true,
+    });
+    expect(migrated).toMatchObject({
+      schemaVersion: 13,
+      uiLocale: 'zh-CN',
+      setupCompleted: true,
+      activeProviderProfileId: profile.id,
+      providerProfiles: [profile],
+    });
+  });
+
+  it('preserves a Responses profile, full model IDs, its catalog and service appearance', () => {
+    const profile = {
+      id: 'gateway',
+      name: 'Local gateway',
+      provider: 'openai-responses',
+      endpoint: 'http://127.0.0.1:3425/v1',
+      model: 'group/auto-gpt-5-6-luna',
+      models: [
+        { id: 'group/auto-gpt-5-6-luna', name: 'Luna' },
+        { id: 'codex/gpt-5.4', name: 'GPT 5.4' },
+      ],
+      modelSelection: 'manual',
+      icon: { type: 'provider', providerId: 'openai' },
+    };
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      providerProfiles: [profile],
+      activeProviderProfileId: profile.id,
+    };
+    expect(resolveSettings(settings)).toEqual(settings);
+  });
+
+  it('keeps custom raster/provider icons and restores automatic icons when preferences are removed', () => {
+    const profile = {
+      id: 'saved',
+      name: 'Custom',
+      provider: 'openai-compatible',
+      model: 'chosen',
+    };
+    const image = {
+      type: 'image',
+      dataUrl:
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVf8AAAAASUVORK5CYII=',
+    };
+    expect(
+      resolveSettings({ providerProfiles: [{ ...profile, icon: image }] })
+        .providerProfiles[0].icon,
+    ).toEqual(image);
+    expect(
+      resolveSettings({
+        providerProfiles: [
+          { ...profile, icon: { type: 'provider', providerId: 'qwen' } },
+        ],
+      }).providerProfiles[0].icon,
+    ).toEqual({ type: 'provider', providerId: 'qwen' });
+    expect(
+      resolveSettings({ providerProfiles: [{ ...profile, icon: undefined }] })
+        .providerProfiles[0],
+    ).toEqual(profile);
+  });
+
+  it('drops unsafe stored icons while keeping the profile and its selected model', () => {
+    const profile = {
+      id: 'saved',
+      name: 'Custom',
+      provider: 'openai-compatible',
+      model: 'chosen',
+    };
+    for (const icon of [
+      { type: 'image', dataUrl: 'https://example.com/icon.png' },
+      { type: 'image', dataUrl: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=' },
+      { type: 'provider', providerId: 'unknown' },
+    ]) {
+      expect(
+        resolveSettings({
+          providerProfiles: [{ ...profile, icon }],
+          activeProviderProfileId: profile.id,
+        }),
+      ).toMatchObject({
+        providerProfiles: [profile],
+        activeProviderProfileId: profile.id,
+      });
+      expect(
+        resolveSettings({ providerProfiles: [{ ...profile, icon }] })
+          .providerProfiles[0],
+      ).not.toHaveProperty('icon');
+    }
   });
 
   it.each([
@@ -217,5 +450,32 @@ describe('resolveSettings', () => {
     expect(resolveSettings({ enabled: 'yes', theme: 'blue' } as never)).toEqual(
       DEFAULT_SETTINGS,
     );
+  });
+});
+
+describe('provider tuning settings', () => {
+  it('clamps tuning values and drops invalid entries', () => {
+    const settings = resolveSettings({
+      schemaVersion: 13,
+      providerProfiles: [
+        {
+          id: 'p',
+          name: 'P',
+          provider: 'deepl',
+          tuning: {
+            concurrency: 99,
+            requestsPerMinute: 0,
+            timeoutSeconds: 'slow',
+            unknown: 3,
+          },
+        },
+        { id: 'q', name: 'Q', provider: 'deepl', tuning: { concurrency: 'x' } },
+      ],
+    });
+    expect(settings.providerProfiles[0].tuning).toEqual({
+      concurrency: 16,
+      requestsPerMinute: 1,
+    });
+    expect(settings.providerProfiles[1]).not.toHaveProperty('tuning');
   });
 });

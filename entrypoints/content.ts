@@ -9,6 +9,13 @@ import { getPageRules } from '@/lib/rules/page-rules';
 import { getSettings, watchSettings } from '@/lib/storage/settings';
 import { createFloatingPageControl } from '@/lib/ui/floating-page-control';
 import { createTextTools } from '@/lib/ui/text-tools';
+import { createVocabularyLayer } from '@/lib/vocabulary/vocabulary-layer';
+import { normalizeWord } from '@/lib/vocabulary/vocabulary-model';
+import {
+  getVocabulary,
+  updateVocabulary,
+  watchVocabulary,
+} from '@/lib/vocabulary/vocabulary-store';
 import './page-translation.css';
 import pageTranslationStyle from './page-translation.css?inline';
 
@@ -47,6 +54,34 @@ export default defineContentScript({
         );
       },
     });
+    const vocabularyLayer = createVocabularyLayer({
+      document,
+      client: createTranslationPortClient(),
+      classify: async (words) =>
+        (await sendMessage('classifyWords', { words })).ranks,
+      getRuleSelectors: async () =>
+        (await getPageRules(location.hostname)).selectors,
+      t: translate,
+      markKnown: async (lemma) => {
+        await updateVocabulary((current) => ({
+          knownWords: [...current.knownWords, normalizeWord(lemma)],
+        }));
+      },
+      save: async (entry) => {
+        await updateVocabulary((current) => ({
+          savedWords: [
+            { ...entry, addedAt: Date.now() },
+            ...current.savedWords.filter((item) => item.word !== entry.word),
+          ],
+        }));
+      },
+    });
+    let displayMode = pageTranslation.snapshot().displayMode;
+    pageTranslation.subscribe(({ snapshot }) => {
+      if (snapshot.displayMode === displayMode) return;
+      displayMode = snapshot.displayMode;
+      vocabularyLayer.refresh();
+    });
     const floatingControl = createFloatingPageControl({
       document,
       isTopFrame: window.top === window,
@@ -64,6 +99,7 @@ export default defineContentScript({
         case 'pageNavigation':
           textTools.suspend();
           onNavigation();
+          vocabularyLayer.refresh();
           return Promise.resolve(pageTranslation.snapshot());
         case 'getPageTranslation':
           return Promise.resolve(pageTranslation.snapshot());
@@ -86,18 +122,26 @@ export default defineContentScript({
 
     void getSettings()
       .then(async (settings) => {
+        pageTranslation.updateAppearance(settings.translationAppearance);
         await changeInterfaceLanguage(settings.uiLocale);
         floatingControl.update(settings);
         textTools.update(settings);
+        vocabularyLayer.updateSettings(settings);
+        vocabularyLayer.updateVocabulary(await getVocabulary());
       })
       .catch((error) => {
         logger.error('Could not initialize content settings.', { error });
       });
+    const unwatchVocabulary = watchVocabulary((vocabulary) =>
+      vocabularyLayer.updateVocabulary(vocabulary),
+    );
     const unwatchSettings = watchSettings((settings) => {
+      pageTranslation.updateAppearance(settings.translationAppearance);
       void changeInterfaceLanguage(settings.uiLocale)
         .then(() => {
           floatingControl.update(settings);
           textTools.update(settings);
+          vocabularyLayer.updateSettings(settings);
         })
         .catch((error) => {
           logger.error('Could not apply updated content settings.', { error });
@@ -115,6 +159,8 @@ export default defineContentScript({
       }
       try {
         unwatchSettings();
+        unwatchVocabulary();
+        vocabularyLayer.dispose();
         floatingControl.dispose();
         textTools.dispose();
         client.disconnect();

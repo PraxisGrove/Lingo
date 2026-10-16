@@ -11,6 +11,7 @@ export type PopupNotice = {
     | 'quota'
     | 'authentication'
     | 'rate-limit'
+    | 'language-pack'
     | 'translation-error';
   titleKey: MessageKey;
   messageKey?: MessageKey;
@@ -73,6 +74,14 @@ export function resolvePopupNotice(
       titleKey: 'popup.notice.authentication.title',
       detail: page.failure.message,
       action: 'review-service',
+    };
+  }
+  if (page.failure.category === 'language-pack') {
+    return {
+      kind: 'language-pack',
+      titleKey: 'popup.notice.languagePack.title',
+      messageKey: 'popup.notice.languagePack.message',
+      action: 'open-settings',
     };
   }
   if (page.failure.category === 'rate-limit') {

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   changeInterfaceLanguage,
   getBrowserInterfaceLocale,
+  translate,
   useInterfaceTranslation,
 } from '@/lib/i18n/i18n';
 import {
@@ -12,7 +13,6 @@ import type { MessageKey } from '@/lib/i18n/resources';
 import { createLogger } from '@/lib/logger/logger';
 import type { ExtensionMessages } from '@/lib/messaging/messages';
 import { sendMessage } from '@/lib/messaging/send-message';
-import { PROVIDER_DEFINITIONS } from '@/lib/providers/config';
 import { communityRuleStore } from '@/lib/rules/community-rules';
 import { ruleSubscriptionItem } from '@/lib/rules/rule-subscription';
 import { userRuleStore } from '@/lib/rules/user-rules';
@@ -21,34 +21,50 @@ import {
   type ExtensionSettings,
   type ExtensionTheme,
   getSettings,
-  type ProviderKind,
-  type ProviderProfile,
   setSettings,
   watchSettings,
 } from '@/lib/storage/settings';
+import { SettingsIcon } from '@/lib/ui/settings-icon';
+import type { SettingsSection } from '@/lib/ui/settings-section';
+import ProviderSetup from './ProviderSetup';
+import ReadingAppearance from './ReadingAppearance';
+import VocabularySettings from './VocabularySettings';
 import './OptionsApp.css';
 
 const logger = createLogger('options');
 type ExtensionStatus = ExtensionMessages['getExtensionStatus']['response'];
-const FIELD_LABELS = {
-  endpoint: 'options.provider.endpoint',
-  model: 'options.provider.model',
-  region: 'options.provider.region',
-  nativeGlossaryId: 'options.provider.glossaryId',
-} satisfies Record<string, MessageKey>;
+type Section = SettingsSection;
+const SECTIONS = [
+  ['provider', 'navigation.services', 'service'],
+  ['reading', 'navigation.reading', 'language'],
+] as const;
 
-function OptionsApp() {
+function OptionsApp({
+  initialSection,
+  activeSection,
+  onSectionChange,
+  embedded = false,
+  onBack,
+  onConnected,
+}: {
+  initialSection?: Section;
+  activeSection?: Section;
+  onSectionChange?: (section: Section) => void;
+  embedded?: boolean;
+  onBack?: () => void;
+  onConnected?: () => void;
+}) {
   const { locale, t } = useInterfaceTranslation();
   const browserLocale = getBrowserInterfaceLocale();
   const [settings, setSettingsState] =
     useState<ExtensionSettings>(DEFAULT_SETTINGS);
-  const [profile, setProfile] = useState<ProviderProfile>({
-    id: crypto.randomUUID(),
-    name: '',
-    provider: 'openai-compatible',
-  });
-  const [credential, setCredential] = useState('');
-  const [status, setStatus] = useState('');
+  const [localSection, setLocalSection] = useState<Section>(
+    () => initialSection ?? sectionFromHash(),
+  );
+  const section = activeSection ?? localSection;
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [onboarding, setOnboarding] = useState(false);
+  const contentHeading = useRef<HTMLHeadingElement>(null);
   const [userRules, setUserRules] = useState('');
   const [glossaryText, setGlossaryText] = useState('');
   const [siteHostname, setSiteHostname] = useState('');
@@ -60,26 +76,30 @@ function OptionsApp() {
   const [subscriptionStatus, setSubscriptionStatus] = useState('');
   const [updatingRules, setUpdatingRules] = useState(false);
   const [communityUpdatesEnabled, setCommunityUpdatesEnabled] = useState(true);
-  const [busy, setBusy] = useState(false);
   const [extensionStatus, setExtensionStatus] =
     useState<ExtensionStatus | null>(null);
   const [privacyStatus, setPrivacyStatus] = useState('');
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   useEffect(() => {
     void getSettings()
       .then(async (loadedSettings) => {
         setSettingsState(loadedSettings);
+        setOnboarding(!embedded && !loadedSettings.setupCompleted);
+        if (!initialSection && !window.location.hash)
+          setLocalSection(
+            loadedSettings.setupCompleted ? 'provider' : 'reading',
+          );
         setGlossaryText(formatGlossary(loadedSettings));
         await changeInterfaceLanguage(loadedSettings.uiLocale);
       })
-      .catch((error) => logger.error('Could not load settings.', { error }));
+      .catch((error) => logger.error('Could not load settings.', { error }))
+      .finally(() => setSettingsLoaded(true));
     void userRuleStore
       .export()
       .then(setUserRules)
       .catch((error) => {
         logger.error('Could not load user rules.', { error });
-        setRuleStatus(t('options.status.rulesLoadError'));
+        setRuleStatus(translate('options.status.rulesLoadError'));
       });
     void ruleSubscriptionItem
       .getValue()
@@ -108,14 +128,34 @@ function OptionsApp() {
         logger.error('Could not apply options interface language.', { error }),
       );
     });
-  }, [t]);
+  }, [embedded, initialSection]);
+
+  useEffect(() => {
+    if (embedded) return;
+    const onHashChange = () => setLocalSection(sectionFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [embedded]);
+
+  function navigate(next: Section) {
+    setLocalSection(next);
+    onSectionChange?.(next);
+    if (!embedded)
+      window.history.replaceState(
+        null,
+        '',
+        next === 'reading' ? '#language-heading' : `#${next}-heading`,
+      );
+    contentHeading.current?.focus();
+    if (embedded) window.scrollTo(0, 0);
+  }
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
     document.documentElement.lang = locale;
     document.documentElement.dir = 'ltr';
-    document.title = `${t('options.title.settings')} - Lingo`;
-  }, [locale, settings.theme, t]);
+    if (!embedded) document.title = `${t('options.title.settings')} - Lingo`;
+  }, [embedded, locale, settings.theme, t]);
 
   async function updateSubscription() {
     setUpdatingRules(true);
@@ -151,35 +191,6 @@ function OptionsApp() {
     const next = await setSettings(patch);
     setSettingsState(next);
     logger.debug('Settings updated.', { patch });
-  }
-
-  async function saveAndTest() {
-    setBusy(true);
-    setStatus(t('options.status.testing'));
-    try {
-      const result = await sendMessage('testProviderConnection', {
-        profile,
-        credential,
-      });
-      if (!result.ok) {
-        setStatus(
-          `${t('options.status.providerError', { category: result.category })}: ${result.message}`,
-        );
-        return;
-      }
-      await sendMessage('saveProviderProfile', { profile, credential });
-      await updateSettings({ setupCompleted: true });
-      setCredential('');
-      setStatus(t('options.status.connectionReady'));
-    } catch (error) {
-      logger.error('Could not test or save provider profile.', {
-        provider: profile.provider,
-        error,
-      });
-      setStatus(t('options.status.connectionError'));
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function saveUserRules() {
@@ -255,684 +266,744 @@ function OptionsApp() {
     setPrivacyStatus(t('options.status.diagnosticsExported'));
   }
 
-  async function deleteActiveProvider() {
-    const profileId = settings.activeProviderProfileId;
-    if (!profileId) return;
-    await sendMessage('deleteProviderProfile', { profileId });
-    setConfirmingDelete(false);
-    setStatus(t('options.status.serviceRemoved'));
-  }
-
-  const providerDefinition =
-    PROVIDER_DEFINITIONS.find((item) => item.value === profile.provider) ??
-    PROVIDER_DEFINITIONS[0];
+  const hasService = settings.providerProfiles.some(
+    (item) => item.id === settings.activeProviderProfileId,
+  );
+  const initialLanguageSetup = onboarding && !hasService;
+  const appearanceControls = (
+    <div hidden={section !== 'reading' || initialLanguageSetup}>
+      <ReadingAppearance
+        appearance={settings.translationAppearance}
+        onChange={(appearance) =>
+          void updateSettings({ translationAppearance: appearance })
+        }
+      />
+    </div>
+  );
   return (
-    <main className="options">
-      <header>
-        <div className="badge">
-          <img src="/icon/lingo-mark.svg" alt="" width="28" height="28" />
-          Lingo
-        </div>
-        <h1>
-          {settings.setupCompleted
-            ? t('options.title.settings')
-            : t('options.title.setup')}
-        </h1>
-        <p>{t('options.subtitle')}</p>
-        {!settings.setupCompleted && (
+    <div className={`settings-shell${embedded ? ' settings-embedded' : ''}`}>
+      <header className="settings-toolbar">
+        {embedded ? (
+          <button className="settings-back" type="button" onClick={onBack}>
+            <SettingsIcon name="back" size={18} />
+            {t('sidebar.backToPage')}
+          </button>
+        ) : (
           <button
-            className="skip-button"
+            className="sidebar-brand"
             type="button"
-            onClick={() => void updateSettings({ setupCompleted: true })}
+            onClick={() => navigate('reading')}
+            aria-label="Lingo"
           >
-            {t('options.setupLater')}
+            <img
+              src="/brand/lingo-symbol-ink.svg"
+              alt=""
+              width="24"
+              height="24"
+            />
+            <img
+              src="/brand/lingo-wordmark-ink.svg"
+              alt="Lingo"
+              width="68"
+              height="24"
+            />
           </button>
         )}
-      </header>
-      <nav className="section-nav" aria-label={t('options.sections.label')}>
-        <a href="#language-heading">{t('options.sections.languages')}</a>
-        <a href="#provider-heading">{t('options.sections.services')}</a>
-        <a href="#automation-heading">{t('options.sections.automation')}</a>
-        <a href="#quality-heading">{t('options.sections.quality')}</a>
-        <a href="#privacy-heading">{t('options.sections.privacy')}</a>
-      </nav>
-      <section className="panel" aria-labelledby="language-heading">
-        <h2 id="language-heading">{t('options.sections.languages')}</h2>
-        <label className="row">
-          <span>
-            <strong>{t('options.interfaceLanguage')}</strong>
-            <small>{t('options.interfaceLanguage.help')}</small>
-          </span>
-          <select
-            value={settings.uiLocale}
-            onChange={(event) => {
-              const uiLocale = event.currentTarget.value as UiLocalePreference;
-              setStatus('');
-              setRuleStatus('');
-              setQualityStatus('');
-              setPrivacyStatus('');
-              void changeInterfaceLanguage(uiLocale).then(() =>
-                updateSettings({ uiLocale }),
-              );
-            }}
-          >
-            <option value="auto">
-              {t('language.auto', {
-                language: t(`language.${browserLocale}` as MessageKey),
-              })}
-            </option>
-            {SUPPORTED_UI_LOCALES.map((supportedLocale) => (
-              <option value={supportedLocale} key={supportedLocale}>
-                {t(`language.${supportedLocale}` as MessageKey)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="row">
-          <span>
-            <strong>{t('options.sourceLanguage')}</strong>
-            <small>{t('options.sourceLanguage.help')}</small>
-          </span>
-          <select
-            value={settings.sourceLanguage}
-            onChange={(event) =>
-              void updateSettings({ sourceLanguage: event.currentTarget.value })
-            }
-          >
-            <option value="auto">{t('options.detectAutomatically')}</option>
-            {SUPPORTED_UI_LOCALES.map((language) => (
-              <option value={language} key={language}>
-                {t(`language.${language}` as MessageKey)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="row">
-          <span>
-            <strong>{t('popup.targetLanguage')}</strong>
-            <small>{t('options.targetLanguage.help')}</small>
-          </span>
-          <select
-            value={settings.targetLanguage}
-            onChange={(event) =>
-              void updateSettings({ targetLanguage: event.currentTarget.value })
-            }
-          >
-            {SUPPORTED_UI_LOCALES.map((language) => (
-              <option value={language} key={language}>
-                {t(`language.${language}` as MessageKey)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </section>
-      <section className="panel" aria-labelledby="automation-heading">
-        <h2 id="automation-heading">{t('options.automation.title')}</h2>
-        <label className="row">
-          <span>
-            <strong>{t('options.automation.enabled')}</strong>
-            <small>{t('options.automation.enabled.help')}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.autoTranslation.enabled}
-            onChange={(event) =>
-              void updateSettings({
-                autoTranslation: {
-                  ...settings.autoTranslation,
-                  enabled: event.currentTarget.checked,
-                },
-              })
-            }
-          />
-        </label>
-        <label className="row">
-          <span>
-            <strong>{t('options.automation.defaultSites')}</strong>
-            <small>{t('options.automation.defaultSites.help')}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.autoTranslation.defaultAutoSitesEnabled}
-            onChange={(event) =>
-              void updateSettings({
-                autoTranslation: {
-                  ...settings.autoTranslation,
-                  defaultAutoSitesEnabled: event.currentTarget.checked,
-                },
-              })
-            }
-          />
-        </label>
-        <label className="row">
-          <span>
-            <strong>{t('options.automation.communityRules')}</strong>
-            <small>{t('options.automation.communityRules.help')}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={communityUpdatesEnabled}
-            onChange={(event) =>
-              void updateCommunityRules(event.currentTarget.checked)
-            }
-          />
-        </label>
-        <div className="language-policy">
-          <label>
-            {t('options.automation.sourcePolicy')}
-            <select
-              value={settings.autoTranslation.sourceLanguagePolicy.mode}
-              onChange={(event) =>
-                void updateSettings({
-                  autoTranslation: {
-                    ...settings.autoTranslation,
-                    sourceLanguagePolicy: {
-                      ...settings.autoTranslation.sourceLanguagePolicy,
-                      mode: event.currentTarget.value as
-                        | 'all'
-                        | 'included'
-                        | 'excluded',
-                    },
-                  },
-                })
-              }
+        <nav className="section-nav" aria-label={t('options.sections.label')}>
+          {SECTIONS.map(([id, label, icon]) => (
+            <a
+              key={id}
+              href={id === 'reading' ? '#language-heading' : `#${id}-heading`}
+              aria-current={section === id ? 'page' : undefined}
+              onClick={(event) => {
+                event.preventDefault();
+                navigate(id);
+              }}
             >
-              <option value="all">{t('options.automation.policy.all')}</option>
-              <option value="included">
-                {t('options.automation.policy.included')}
-              </option>
-              <option value="excluded">
-                {t('options.automation.policy.excluded')}
-              </option>
-            </select>
-          </label>
-          <label>
-            {t('options.sections.languages')}
-            <input
-              value={settings.autoTranslation.sourceLanguagePolicy.languages.join(
-                ', ',
-              )}
-              disabled={
-                settings.autoTranslation.sourceLanguagePolicy.mode === 'all'
-              }
-              placeholder="en, ja"
-              onChange={(event) =>
-                void updateSettings({
-                  autoTranslation: {
-                    ...settings.autoTranslation,
-                    sourceLanguagePolicy: {
-                      ...settings.autoTranslation.sourceLanguagePolicy,
-                      languages: event.currentTarget.value
-                        .split(',')
-                        .map((language) => language.trim())
-                        .filter(Boolean),
-                    },
-                  },
-                })
-              }
-            />
-          </label>
-        </div>
-      </section>
-      <section className="panel" aria-labelledby="text-tools-heading">
-        <h2 id="text-tools-heading">{t('tools.title')}</h2>
-        <p>{t('tools.shortcuts')}</p>
-        <label className="row">
-          <span>
-            <strong>{t('tools.selectionButton')}</strong>
-            <small>{t('tools.selectionHelp')}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.selectionButtonEnabled}
-            onChange={(event) =>
-              void updateSettings({
-                selectionButtonEnabled: event.currentTarget.checked,
-              })
-            }
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() =>
-            void browser.tabs.create({
-              url: browser.runtime.getURL('/translate.html'),
-            })
-          }
-        >
-          {t('tools.menuOpen')}
-        </button>
-      </section>
-      <section className="panel" aria-labelledby="site-rules-heading">
-        <h2 id="site-rules-heading">{t('options.rules.title')}</h2>
-        <p>{t('rules.subscription.help')}</p>
-        <label>
-          {t('rules.subscription.url')}
-          <input
-            type="url"
-            value={ruleUrl}
-            onChange={(event) => setRuleUrl(event.currentTarget.value)}
-          />
-        </label>
-        <label>
-          {t('rules.subscription.key')}
-          <input
-            value={ruleKey}
-            onChange={(event) => setRuleKey(event.currentTarget.value)}
-            spellCheck={false}
-          />
-        </label>
-        <button
-          type="button"
-          disabled={
-            updatingRules || !communityUpdatesEnabled || !ruleUrl || !ruleKey
-          }
-          onClick={() => void updateSubscription()}
-        >
-          {t('rules.subscription.update')}
-        </button>
-        <p role="status">{subscriptionStatus}</p>
-        <div className="rule-editor">
-          <textarea
-            aria-label={t('options.rules.jsonLabel')}
-            value={userRules}
-            onChange={(event) => setUserRules(event.currentTarget.value)}
-            spellCheck={false}
-          />
-          <div className="rule-actions">
-            <button type="button" onClick={() => void saveUserRules()}>
-              {t('options.rules.save')}
-            </button>
-            <button type="button" onClick={downloadUserRules}>
-              {t('options.rules.export')}
-            </button>
-          </div>
-          <p className="connection-status" role="status">
-            {ruleStatus}
-          </p>
-        </div>
-      </section>
-      <section className="panel" aria-labelledby="quality-heading">
-        <h2 id="quality-heading">{t('options.quality.title')}</h2>
-        <label className="row">
-          <span>
-            <strong>{t('options.quality.template')}</strong>
-            <small>{t('options.quality.template.help')}</small>
-          </span>
-          <select
-            value={settings.translationQuality.template}
-            onChange={(event) =>
-              void updateSettings({
-                translationQuality: {
-                  ...settings.translationQuality,
-                  template: event.currentTarget.value as
-                    | 'faithful'
-                    | 'natural'
-                    | 'concise',
-                },
-              })
-            }
-          >
-            <option value="faithful">{t('options.quality.faithful')}</option>
-            <option value="natural">{t('options.quality.natural')}</option>
-            <option value="concise">{t('options.quality.concise')}</option>
-          </select>
-        </label>
-        <label>
-          {t('options.quality.instruction')}
-          <textarea
-            value={settings.translationQuality.instruction}
-            onChange={(event) =>
-              void updateSettings({
-                translationQuality: {
-                  ...settings.translationQuality,
-                  instruction: event.currentTarget.value,
-                },
-              })
-            }
-          />
-        </label>
-        <label>
-          {t('options.quality.globalGlossary')}
-          <textarea
-            aria-label={t('options.quality.glossaryLabel')}
-            placeholder="Lingo => Lingo"
-            value={glossaryText}
-            onChange={(event) => setGlossaryText(event.currentTarget.value)}
-            onBlur={(event) =>
-              void updateSettings({
-                translationQuality: {
-                  ...settings.translationQuality,
-                  glossary: parseGlossary(event.currentTarget.value),
-                },
-              })
-            }
-          />
-        </label>
-        <div className="site-glossary">
-          <h3>{t('options.quality.siteGlossary')}</h3>
-          <p className="site-glossary-intro">
-            {t('options.quality.siteGlossary.help')}
-          </p>
-          <label>
-            {t('options.quality.hostname')}
-            <input
-              list="site-glossary-hostnames"
-              value={siteHostname}
-              placeholder="docs.example.com"
-              onChange={(event) =>
-                selectSiteGlossary(event.currentTarget.value)
-              }
-            />
-            <datalist id="site-glossary-hostnames">
-              {Object.keys(settings.siteGlossaries).map((hostname) => (
-                <option value={hostname} key={hostname} />
-              ))}
-            </datalist>
-          </label>
-          <label>
-            {t('options.quality.terms')}
-            <textarea
-              value={siteGlossaryText}
-              placeholder="API => interface"
-              onChange={(event) =>
-                setSiteGlossaryText(event.currentTarget.value)
-              }
-            />
-          </label>
-          <div className="site-glossary-actions">
-            <button type="button" onClick={() => void saveSiteGlossary()}>
-              {t('options.quality.saveSiteGlossary')}
-            </button>
-            <p className="connection-status" role="status">
-              {qualityStatus}
-            </p>
-          </div>
-        </div>
-      </section>
-      <section
-        className="panel provider-panel"
-        aria-labelledby="provider-heading"
-      >
-        <h2 id="provider-heading">{t('popup.translationService')}</h2>
-        {settings.providerProfiles.length > 0 && (
-          <div className="saved-profile-row">
-            <label className="existing-profile">
-              {t('options.provider.savedProfile')}
-              <select
-                value={settings.activeProviderProfileId ?? ''}
-                onChange={(event) =>
-                  void (async () => {
-                    setConfirmingDelete(false);
-                    await updateSettings({
-                      activeProviderProfileId: event.currentTarget.value,
-                    });
-                  })()
-                }
-              >
-                {settings.providerProfiles.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <SettingsIcon name={icon} />
+              <span>{t(label)}</span>
+            </a>
+          ))}
+          <div className="advanced-nav">
             <button
-              className="danger-button"
               type="button"
-              onClick={() =>
-                confirmingDelete
-                  ? void deleteActiveProvider()
-                  : setConfirmingDelete(true)
-              }
+              aria-current={section === 'advanced' ? 'page' : undefined}
+              onClick={() => navigate('advanced')}
             >
-              {confirmingDelete
-                ? t('options.provider.confirmRemoval')
-                : t('options.provider.removeSelected')}
+              <SettingsIcon name="general" />
+              <span>{t('navigation.advanced')}</span>
             </button>
-            {confirmingDelete && (
-              <button
-                className="cancel-button"
-                type="button"
-                onClick={() => setConfirmingDelete(false)}
-              >
-                {t('options.cancel')}
-              </button>
-            )}
           </div>
+        </nav>
+      </header>
+      <main className="options">
+        <header className="settings-header">
+          <div>
+            <h1 ref={contentHeading} tabIndex={-1}>
+              {embedded || settings.setupCompleted
+                ? t('options.title.settings')
+                : t('options.title.setup')}
+            </h1>
+          </div>
+          <span
+            className="autosave-note"
+            hidden={embedded && section === 'provider'}
+          >
+            <SettingsIcon name="check" size={15} />
+            {t('navigation.preferencesSaved')}
+          </span>
+        </header>
+        {initialLanguageSetup && section === 'reading' && (
+          <section className="welcome-panel">
+            <div className="welcome-copy">
+              <h2>{t('experience.setup.title')}</h2>
+              <p>{t('experience.setup.description')}</p>
+              <button
+                className="skip-button"
+                type="button"
+                onClick={() => {
+                  setOnboarding(false);
+                  void updateSettings({ setupCompleted: true });
+                }}
+              >
+                {t('options.setupLater')}
+              </button>
+            </div>
+          </section>
         )}
-        {settings.providerProfiles.length > 1 && (
-          <fieldset className="fallback-chain">
-            <legend>{t('options.provider.fallbackServices')}</legend>
-            {settings.providerProfiles
-              .filter((item) => item.id !== settings.activeProviderProfileId)
-              .map((item) => (
-                <label key={item.id}>
-                  <input
-                    type="checkbox"
-                    checked={settings.fallbackProviderProfileIds.includes(
-                      item.id,
-                    )}
-                    onChange={(event) =>
-                      void updateSettings({
-                        fallbackProviderProfileIds: event.currentTarget.checked
-                          ? [...settings.fallbackProviderProfileIds, item.id]
-                          : settings.fallbackProviderProfileIds.filter(
-                              (id) => id !== item.id,
-                            ),
-                      })
-                    }
-                  />
-                  {item.name}
-                </label>
-              ))}
-            {settings.fallbackProviderProfileIds.length > 0 && (
-              <ol className="fallback-order">
-                {settings.fallbackProviderProfileIds.map((id) => (
-                  <li key={id}>
-                    {settings.providerProfiles.find((item) => item.id === id)
-                      ?.name ?? id}
-                  </li>
-                ))}
-              </ol>
-            )}
-          </fieldset>
-        )}
-        <div className="form-grid">
-          <label>
-            {t('options.provider.provider')}
-            <select
-              value={profile.provider}
-              onChange={(event) =>
-                setProfile({
-                  id: profile.id,
-                  name: profile.name,
-                  provider: event.currentTarget.value as ProviderKind,
-                })
-              }
+        {onboarding && (
+          <nav className="setup-progress" aria-label={t('options.title.setup')}>
+            <button
+              type="button"
+              className={section === 'reading' ? 'current' : ''}
+              onClick={() => navigate('reading')}
             >
-              {PROVIDER_DEFINITIONS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
+              <SettingsIcon name="language" size={15} />
+              {t('experience.setup.stepLanguage')}
+            </button>
+            <div className="step-line" />
+            <button
+              type="button"
+              className={section === 'provider' ? 'current' : ''}
+              onClick={() => {
+                navigate('provider');
+              }}
+            >
+              <SettingsIcon name="service" size={15} />
+              {t('experience.setup.stepService')}
+            </button>
+          </nav>
+        )}
+        {embedded && appearanceControls}
+        <section
+          className="panel"
+          aria-labelledby="language-heading"
+          hidden={section !== 'reading'}
+        >
+          <h2 id="language-heading">{t('options.sections.languages')}</h2>
+          <p className="section-description">
+            {t('experience.section.languages')}
+          </p>
+          <label className="row">
+            <span>
+              <strong>{t('options.interfaceLanguage')}</strong>
+              <small>{t('options.interfaceLanguage.help')}</small>
+            </span>
+            <select
+              value={settings.uiLocale}
+              onChange={(event) => {
+                const uiLocale = event.currentTarget
+                  .value as UiLocalePreference;
+                setRuleStatus('');
+                setQualityStatus('');
+                setPrivacyStatus('');
+                void changeInterfaceLanguage(uiLocale).then(() =>
+                  updateSettings({ uiLocale }),
+                );
+              }}
+            >
+              <option value="auto">
+                {t('language.auto', {
+                  language: t(`language.${browserLocale}` as MessageKey),
+                })}
+              </option>
+              {SUPPORTED_UI_LOCALES.map((supportedLocale) => (
+                <option value={supportedLocale} key={supportedLocale}>
+                  {t(`language.${supportedLocale}` as MessageKey)}
                 </option>
               ))}
             </select>
           </label>
-          <label>
-            {t('options.provider.profileName')}
-            <input
-              value={profile.name}
-              placeholder={t('options.provider.profilePlaceholder')}
+          <label className="row">
+            <span>
+              <strong>{t('options.sourceLanguage')}</strong>
+              <small>{t('options.sourceLanguage.help')}</small>
+            </span>
+            <select
+              value={settings.sourceLanguage}
               onChange={(event) =>
-                setProfile({ ...profile, name: event.currentTarget.value })
+                void updateSettings({
+                  sourceLanguage: event.currentTarget.value,
+                })
+              }
+            >
+              <option value="auto">{t('options.detectAutomatically')}</option>
+              {SUPPORTED_UI_LOCALES.map((language) => (
+                <option value={language} key={language}>
+                  {t(`language.${language}` as MessageKey)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="row">
+            <span>
+              <strong>{t('popup.targetLanguage')}</strong>
+              <small>{t('options.targetLanguage.help')}</small>
+            </span>
+            <select
+              value={settings.targetLanguage}
+              onChange={(event) =>
+                void updateSettings({
+                  targetLanguage: event.currentTarget.value,
+                })
+              }
+            >
+              {SUPPORTED_UI_LOCALES.map((language) => (
+                <option value={language} key={language}>
+                  {t(`language.${language}` as MessageKey)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {onboarding && !hasService && (
+            <div className="panel-footer">
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => navigate('provider')}
+              >
+                {t('experience.setup.next')}
+                <SettingsIcon name="arrow" size={18} />
+              </button>
+            </div>
+          )}
+        </section>
+        {!embedded && appearanceControls}
+        <section
+          className="panel"
+          aria-labelledby="automation-heading"
+          hidden={section !== 'reading' || initialLanguageSetup}
+        >
+          <h2 id="automation-heading">{t('options.automation.title')}</h2>
+          <p className="section-description">
+            {t('experience.section.automation')}
+          </p>
+          <label className="row">
+            <span>
+              <strong>{t('options.automation.enabled')}</strong>
+              <small>{t('options.automation.enabled.help')}</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.autoTranslation.enabled}
+              onChange={(event) =>
+                void updateSettings({
+                  autoTranslation: {
+                    ...settings.autoTranslation,
+                    enabled: event.currentTarget.checked,
+                  },
+                })
               }
             />
           </label>
-          {providerDefinition.fields.map((field) => (
-            <label key={field}>
-              {t(FIELD_LABELS[field])}
-              <input
-                value={profile[field] ?? ''}
+          <label className="row">
+            <span>
+              <strong>{t('options.automation.defaultSites')}</strong>
+              <small>{t('options.automation.defaultSites.help')}</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.autoTranslation.defaultAutoSitesEnabled}
+              onChange={(event) =>
+                void updateSettings({
+                  autoTranslation: {
+                    ...settings.autoTranslation,
+                    defaultAutoSitesEnabled: event.currentTarget.checked,
+                  },
+                })
+              }
+            />
+          </label>
+          <div className="language-policy">
+            <label>
+              {t('options.automation.sourcePolicy')}
+              <select
+                value={settings.autoTranslation.sourceLanguagePolicy.mode}
                 onChange={(event) =>
-                  setProfile({
-                    ...profile,
-                    [field]: event.currentTarget.value || undefined,
+                  void updateSettings({
+                    autoTranslation: {
+                      ...settings.autoTranslation,
+                      sourceLanguagePolicy: {
+                        ...settings.autoTranslation.sourceLanguagePolicy,
+                        mode: event.currentTarget.value as
+                          | 'all'
+                          | 'included'
+                          | 'excluded',
+                      },
+                    },
+                  })
+                }
+              >
+                <option value="all">
+                  {t('options.automation.policy.all')}
+                </option>
+                <option value="included">
+                  {t('options.automation.policy.included')}
+                </option>
+                <option value="excluded">
+                  {t('options.automation.policy.excluded')}
+                </option>
+              </select>
+            </label>
+            <label>
+              {t('options.sections.languages')}
+              <input
+                value={settings.autoTranslation.sourceLanguagePolicy.languages.join(
+                  ', ',
+                )}
+                disabled={
+                  settings.autoTranslation.sourceLanguagePolicy.mode === 'all'
+                }
+                placeholder="en, ja"
+                onChange={(event) =>
+                  void updateSettings({
+                    autoTranslation: {
+                      ...settings.autoTranslation,
+                      sourceLanguagePolicy: {
+                        ...settings.autoTranslation.sourceLanguagePolicy,
+                        languages: event.currentTarget.value
+                          .split(',')
+                          .map((language) => language.trim())
+                          .filter(Boolean),
+                      },
+                    },
                   })
                 }
               />
             </label>
-          ))}
-          <label>
-            {t('options.provider.credential')}
+          </div>
+        </section>
+        <section
+          className="panel"
+          aria-labelledby="text-tools-heading"
+          hidden={section !== 'reading' || initialLanguageSetup}
+        >
+          <h2 id="text-tools-heading">{t('tools.title')}</h2>
+          <p>{t('tools.shortcuts')}</p>
+          <label className="row">
+            <span>
+              <strong>{t('tools.selectionButton')}</strong>
+              <small>{t('tools.selectionHelp')}</small>
+            </span>
             <input
-              type="password"
-              value={credential}
-              autoComplete="off"
-              onChange={(event) => setCredential(event.currentTarget.value)}
+              type="checkbox"
+              checked={settings.selectionButtonEnabled}
+              onChange={(event) =>
+                void updateSettings({
+                  selectionButtonEnabled: event.currentTarget.checked,
+                })
+              }
             />
           </label>
-        </div>
-        <div className="connection-actions">
           <button
             type="button"
-            disabled={busy || !profile.name || !credential}
-            onClick={() => void saveAndTest()}
+            onClick={() =>
+              void browser.tabs.create({
+                url: browser.runtime.getURL('/translate.html'),
+              })
+            }
           >
-            {busy
-              ? t('options.provider.testing')
-              : t('options.provider.saveAndTest')}
+            {t('tools.menuOpen')}
           </button>
-          <p className="connection-status" role="status">
-            {status}
-          </p>
-        </div>
-        <small className="privacy-note">
-          {t('options.provider.privacyNote')}
-        </small>
-        <div className="translation-preview">
-          <span>{t('options.provider.previewSource')}</span>
-          <span>{t('options.provider.previewTarget')}</span>
-        </div>
-      </section>
-      <section
-        className="panel"
-        id="privacy-heading"
-        aria-labelledby="privacy-title"
-      >
-        <h2 id="privacy-title">{t('options.privacy.title')}</h2>
-        <div className="status-list">
-          <div>
-            <span>{t('options.privacy.pageAccess')}</span>
-            <strong>
-              {extensionStatus?.hostPermissionGranted
-                ? t('options.privacy.allowedAllSites')
-                : t('options.privacy.notGranted')}
-            </strong>
-            {extensionStatus && !extensionStatus.hostPermissionGranted && (
-              <small>{t('options.privacy.grantAccess')}</small>
-            )}
+        </section>
+        <VocabularySettings
+          hidden={section !== 'reading' || initialLanguageSetup}
+          serviceName={
+            settings.providerProfiles.find(
+              (profile) => profile.id === settings.activeProviderProfileId,
+            )?.name
+          }
+        />
+        {section === 'advanced' && (
+          <div className="advanced-intro">
+            <h2 id="advanced-heading">{t('navigation.advanced')}</h2>
+            <p>{t('navigation.advancedHelp')}</p>
           </div>
-          <div>
-            <span>{t('options.settings.cache')}</span>
-            <strong>
-              {extensionStatus
-                ? t('options.privacy.cacheUsage', {
-                    count: extensionStatus.cache.entryCount,
-                    size: formatBytes(extensionStatus.cache.byteSize, locale),
+        )}
+        <details
+          className="advanced-disclosure"
+          hidden={section !== 'advanced'}
+        >
+          <summary>{t('navigation.rulesTitle')}</summary>
+          <section className="panel" aria-labelledby="site-rules-heading">
+            <h2 id="site-rules-heading">{t('navigation.rulesTitle')}</h2>
+            <p>{t('navigation.rulesHelp')}</p>
+            <details className="nested-advanced">
+              <summary>{t('navigation.communityRules')}</summary>
+              <label className="row">
+                <span>
+                  <strong>{t('options.automation.communityRules')}</strong>
+                  <small>{t('options.automation.communityRules.help')}</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={communityUpdatesEnabled}
+                  onChange={(event) =>
+                    void updateCommunityRules(event.currentTarget.checked)
+                  }
+                />
+              </label>
+              <label>
+                {t('rules.subscription.url')}
+                <input
+                  type="url"
+                  value={ruleUrl}
+                  onChange={(event) => setRuleUrl(event.currentTarget.value)}
+                />
+              </label>
+              <label>
+                {t('rules.subscription.key')}
+                <input
+                  value={ruleKey}
+                  onChange={(event) => setRuleKey(event.currentTarget.value)}
+                  spellCheck={false}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={
+                  updatingRules ||
+                  !communityUpdatesEnabled ||
+                  !ruleUrl ||
+                  !ruleKey
+                }
+                onClick={() => void updateSubscription()}
+              >
+                {t('rules.subscription.update')}
+              </button>
+              <p role="status">{subscriptionStatus}</p>
+            </details>
+            <details className="nested-advanced">
+              <summary>{t('navigation.ruleEditor')}</summary>
+              <div className="rule-editor">
+                <textarea
+                  aria-label={t('options.rules.jsonLabel')}
+                  value={userRules}
+                  onChange={(event) => setUserRules(event.currentTarget.value)}
+                  spellCheck={false}
+                />
+                <div className="rule-actions">
+                  <button type="button" onClick={() => void saveUserRules()}>
+                    {t('options.rules.save')}
+                  </button>
+                  <button type="button" onClick={downloadUserRules}>
+                    {t('options.rules.export')}
+                  </button>
+                </div>
+                <p className="connection-status" role="status">
+                  {ruleStatus}
+                </p>
+              </div>
+            </details>
+          </section>
+        </details>
+        <details
+          className="advanced-disclosure"
+          hidden={section !== 'advanced'}
+        >
+          <summary>{t('navigation.translationStyle')}</summary>
+          <section className="panel" aria-labelledby="quality-heading">
+            <h2 id="quality-heading">{t('options.quality.title')}</h2>
+            <p className="section-description">
+              {t('experience.section.quality')}
+            </p>
+            <label className="row">
+              <span>
+                <strong>{t('options.quality.template')}</strong>
+                <small>{t('options.quality.template.help')}</small>
+              </span>
+              <select
+                value={settings.translationQuality.template}
+                onChange={(event) =>
+                  void updateSettings({
+                    translationQuality: {
+                      ...settings.translationQuality,
+                      template: event.currentTarget.value as
+                        | 'faithful'
+                        | 'natural'
+                        | 'concise',
+                    },
                   })
-                : t('options.privacy.calculating')}
-            </strong>
-          </div>
-          <div>
-            <span>{t('popup.dataFlow')}</span>
-            <strong>
-              {t('options.privacy.webpageToProvider', {
-                provider:
-                  settings.providerProfiles.find(
-                    (item) => item.id === settings.activeProviderProfileId,
-                  )?.name ?? t('popup.noServiceSelected'),
-              })}
-            </strong>
-            <small>{t('options.privacy.dataFlowHelp')}</small>
-          </div>
-        </div>
-        <div className="privacy-actions">
-          <button type="button" onClick={() => void exportDiagnostics()}>
-            {t('options.privacy.exportDiagnostics')}
-          </button>
-          <button type="button" onClick={() => void clearCache()}>
-            {t('options.privacy.clearCache')}
-          </button>
-        </div>
-        <p className="connection-status" role="status">
-          {privacyStatus}
-        </p>
-      </section>
-      <section className="panel" aria-label={t('options.settings.label')}>
-        <label className="row">
-          <span>
-            <strong>{t('options.settings.cache')}</strong>
-            <small>{t('options.settings.cache.help')}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.translationCacheEnabled}
-            onChange={(event) =>
-              void updateSettings({
-                translationCacheEnabled: event.currentTarget.checked,
-              })
-            }
-          />
-        </label>
-        <label className="row">
-          <span>
-            <strong>{t('options.settings.floatingControl')}</strong>
-            <small>{t('options.settings.floatingControl.help')}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.floatingButtonEnabled}
-            onChange={(event) =>
-              void updateSettings({
-                floatingButtonEnabled: event.currentTarget.checked,
-              })
-            }
-          />
-        </label>
-        <label className="row">
-          <span>
-            <strong>{t('options.settings.enabled')}</strong>
-            <small>{t('options.settings.enabled.help')}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.enabled}
-            onChange={(event) =>
-              void updateSettings({ enabled: event.currentTarget.checked })
-            }
-          />
-        </label>
-        <label className="row">
-          <span>
-            <strong>{t('options.settings.theme')}</strong>
-            <small>{t('options.settings.theme.help')}</small>
-          </span>
-          <select
-            value={settings.theme}
-            onChange={(event) =>
-              void updateSettings({
-                theme: event.currentTarget.value as ExtensionTheme,
-              })
-            }
+                }
+              >
+                <option value="faithful">
+                  {t('options.quality.faithful')}
+                </option>
+                <option value="natural">{t('options.quality.natural')}</option>
+                <option value="concise">{t('options.quality.concise')}</option>
+              </select>
+            </label>
+            <label>
+              {t('options.quality.instruction')}
+              <textarea
+                value={settings.translationQuality.instruction}
+                onChange={(event) =>
+                  void updateSettings({
+                    translationQuality: {
+                      ...settings.translationQuality,
+                      instruction: event.currentTarget.value,
+                    },
+                  })
+                }
+              />
+            </label>
+            <label>
+              {t('options.quality.globalGlossary')}
+              <textarea
+                aria-label={t('options.quality.glossaryLabel')}
+                placeholder="Lingo => Lingo"
+                value={glossaryText}
+                onChange={(event) => setGlossaryText(event.currentTarget.value)}
+                onBlur={(event) =>
+                  void updateSettings({
+                    translationQuality: {
+                      ...settings.translationQuality,
+                      glossary: parseGlossary(event.currentTarget.value),
+                    },
+                  })
+                }
+              />
+            </label>
+            <div className="site-glossary">
+              <h3>{t('options.quality.siteGlossary')}</h3>
+              <p className="site-glossary-intro">
+                {t('options.quality.siteGlossary.help')}
+              </p>
+              <label>
+                {t('options.quality.hostname')}
+                <input
+                  list="site-glossary-hostnames"
+                  value={siteHostname}
+                  placeholder="docs.example.com"
+                  onChange={(event) =>
+                    selectSiteGlossary(event.currentTarget.value)
+                  }
+                />
+                <datalist id="site-glossary-hostnames">
+                  {Object.keys(settings.siteGlossaries).map((hostname) => (
+                    <option value={hostname} key={hostname} />
+                  ))}
+                </datalist>
+              </label>
+              <label>
+                {t('options.quality.terms')}
+                <textarea
+                  value={siteGlossaryText}
+                  placeholder="API => interface"
+                  onChange={(event) =>
+                    setSiteGlossaryText(event.currentTarget.value)
+                  }
+                />
+              </label>
+              <div className="site-glossary-actions">
+                <button type="button" onClick={() => void saveSiteGlossary()}>
+                  {t('options.quality.saveSiteGlossary')}
+                </button>
+                <p className="connection-status" role="status">
+                  {qualityStatus}
+                </p>
+              </div>
+            </div>
+          </section>
+        </details>
+        <section
+          hidden={section !== 'provider'}
+          aria-labelledby="provider-heading"
+        >
+          {settingsLoaded && (
+            <ProviderSetup
+              settings={settings}
+              keepDraft={embedded}
+              onSettingsChange={setSettingsState}
+              onConnected={() => {
+                setOnboarding(false);
+                onConnected?.();
+              }}
+              onBack={
+                onboarding && !hasService
+                  ? () => navigate('reading')
+                  : undefined
+              }
+            />
+          )}
+        </section>
+        <details
+          className="advanced-disclosure"
+          hidden={section !== 'advanced'}
+        >
+          <summary>{t('navigation.diagnostics')}</summary>
+          <section
+            className="panel"
+            id="privacy-heading"
+            aria-labelledby="privacy-title"
           >
-            <option value="system">{t('options.settings.theme.system')}</option>
-            <option value="light">{t('options.settings.theme.light')}</option>
-            <option value="dark">{t('options.settings.theme.dark')}</option>
-          </select>
-        </label>
-      </section>
-    </main>
+            <h2 id="privacy-title">{t('options.privacy.title')}</h2>
+            <p className="section-description">
+              {t('experience.section.privacy')}
+            </p>
+            <div className="status-list">
+              <div>
+                <span>{t('options.privacy.pageAccess')}</span>
+                <strong>
+                  {extensionStatus?.hostPermissionGranted
+                    ? t('options.privacy.allowedAllSites')
+                    : t('options.privacy.notGranted')}
+                </strong>
+                {extensionStatus && !extensionStatus.hostPermissionGranted && (
+                  <small>{t('options.privacy.grantAccess')}</small>
+                )}
+              </div>
+              <div>
+                <span>{t('options.settings.cache')}</span>
+                <strong>
+                  {extensionStatus
+                    ? t('options.privacy.cacheUsage', {
+                        count: extensionStatus.cache.entryCount,
+                        size: formatBytes(
+                          extensionStatus.cache.byteSize,
+                          locale,
+                        ),
+                      })
+                    : t('options.privacy.calculating')}
+                </strong>
+              </div>
+              <div>
+                <span>{t('popup.dataFlow')}</span>
+                <strong>
+                  {t('options.privacy.webpageToProvider', {
+                    provider:
+                      settings.providerProfiles.find(
+                        (item) => item.id === settings.activeProviderProfileId,
+                      )?.name ?? t('popup.noServiceSelected'),
+                  })}
+                </strong>
+                <small>{t('options.privacy.dataFlowHelp')}</small>
+              </div>
+            </div>
+            <label className="row">
+              <span>
+                <strong>{t('options.settings.cache')}</strong>
+                <small>{t('options.settings.cache.help')}</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={settings.translationCacheEnabled}
+                onChange={(event) =>
+                  void updateSettings({
+                    translationCacheEnabled: event.currentTarget.checked,
+                  })
+                }
+              />
+            </label>
+            <div className="privacy-actions">
+              <button type="button" onClick={() => void exportDiagnostics()}>
+                {t('options.privacy.exportDiagnostics')}
+              </button>
+              <button type="button" onClick={() => void clearCache()}>
+                {t('options.privacy.clearCache')}
+              </button>
+            </div>
+            <p className="connection-status" role="status">
+              {privacyStatus}
+            </p>
+          </section>
+        </details>
+        <section
+          className="panel"
+          aria-label={t('options.settings.label')}
+          hidden={section !== 'reading' || initialLanguageSetup}
+        >
+          <h2 id="general-heading">{t('experience.nav.general')}</h2>
+          <p className="section-description">
+            {t('experience.section.general')}
+          </p>
+          <label className="row">
+            <span>
+              <strong>{t('options.settings.floatingControl')}</strong>
+              <small>{t('options.settings.floatingControl.help')}</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.floatingButtonEnabled}
+              onChange={(event) =>
+                void updateSettings({
+                  floatingButtonEnabled: event.currentTarget.checked,
+                })
+              }
+            />
+          </label>
+          <label className="row">
+            <span>
+              <strong>{t('options.settings.enabled')}</strong>
+              <small>{t('options.settings.enabled.help')}</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.enabled}
+              onChange={(event) =>
+                void updateSettings({ enabled: event.currentTarget.checked })
+              }
+            />
+          </label>
+          <label className="row">
+            <span>
+              <strong>{t('options.settings.theme')}</strong>
+              <small>{t('options.settings.theme.help')}</small>
+            </span>
+            <select
+              value={settings.theme}
+              onChange={(event) =>
+                void updateSettings({
+                  theme: event.currentTarget.value as ExtensionTheme,
+                })
+              }
+            >
+              <option value="system">
+                {t('options.settings.theme.system')}
+              </option>
+              <option value="light">{t('options.settings.theme.light')}</option>
+              <option value="dark">{t('options.settings.theme.dark')}</option>
+            </select>
+          </label>
+        </section>
+      </main>
+    </div>
   );
+}
+
+function sectionFromHash(): Section {
+  const hash = window.location.hash;
+  if (hash === '#provider-heading') return 'provider';
+  if (
+    [
+      '#advanced-heading',
+      '#quality-heading',
+      '#privacy-heading',
+      '#site-rules-heading',
+    ].includes(hash)
+  )
+    return 'advanced';
+  return 'reading';
 }
 
 function formatGlossary(settings: ExtensionSettings): string {

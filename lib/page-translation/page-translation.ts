@@ -2,6 +2,12 @@ import type { TranslationUnit } from '@/lib/translation/types';
 import type { Logger } from '../logger/logger';
 import type { RuleSelectors } from '../rules/rule-resolver';
 import {
+  applyTranslationAppearance,
+  DEFAULT_TRANSLATION_APPEARANCE,
+  resolveTranslationAppearance,
+  type TranslationAppearance,
+} from './appearance';
+import {
   accessibleRoots,
   composedClosest,
   composedContains,
@@ -59,6 +65,7 @@ export type PageTranslation = {
   stop(): Promise<void>;
   subscribe(listener: (event: PageTranslationEvent) => void): () => void;
   snapshot(): SessionSnapshot;
+  updateAppearance(appearance: TranslationAppearance): void;
 };
 
 type TranslationClient = (
@@ -75,6 +82,7 @@ type PageTranslationDependencies = {
   watchNavigation?: (listener: () => void) => () => void;
   logger?: Logger;
   shadowStyle?: string;
+  appearance?: TranslationAppearance;
 };
 
 type Candidate = {
@@ -113,7 +121,8 @@ const OBSERVATION_OPTIONS: MutationObserverInit = {
 const TRANSLATION_ATTRIBUTE = 'data-lingo-translation';
 const HIDDEN_ATTRIBUTE = 'data-lingo-hidden';
 const TABLE_CELL_HIDDEN_ATTRIBUTE = 'data-lingo-cell-original-hidden';
-const PROTECTED_SELECTOR = [
+const SOURCE_ATTRIBUTE = 'data-lingo-source';
+export const PROTECTED_SELECTOR = [
   '[data-lingo-owned]',
   '[data-lingo-floating-control]',
   '[data-lingo-content="exclude"]',
@@ -135,7 +144,7 @@ const PROTECTED_SELECTOR = [
   '[class*="advert" i]',
   '[class~="ad" i]',
 ].join(',');
-const INTERFACE_SELECTOR =
+export const INTERFACE_SELECTOR =
   '[data-lingo-content="interface"], nav, header, footer, [role="navigation"]';
 const CONTENT_CANDIDATE_SELECTOR =
   'h1, h2, h3, h4, h5, h6, p, li, blockquote, figcaption, td, th';
@@ -169,6 +178,7 @@ export function createPageTranslation({
   watchNavigation,
   logger,
   shadowStyle,
+  appearance = DEFAULT_TRANSLATION_APPEARANCE,
 }: PageTranslationDependencies): PageTranslation {
   const listeners = new Set<(event: PageTranslationEvent) => void>();
   const unitIds = new WeakMap<HTMLElement, string>();
@@ -185,6 +195,7 @@ export function createPageTranslation({
   const observedRoots = new Set<ShadowRoot>();
   const shadowStyles = new Set<HTMLStyleElement>();
   let shadowDiscoveryTimer: ReturnType<typeof setInterval> | undefined;
+  let colorSchemeQuery: MediaQueryList | undefined;
   let intersectionObserver: IntersectionObserver | undefined;
   let mutationScheduled = false;
   const mutationRoots = new Set<Element>();
@@ -215,6 +226,11 @@ export function createPageTranslation({
     }
   }
 
+  function refreshAppearance() {
+    for (const [source, translation] of insertedTranslations)
+      applyTranslationAppearance(source, translation, appearance);
+  }
+
   function applyUnitDisplayMode(
     original: HTMLElement,
     translation: HTMLElement,
@@ -226,6 +242,7 @@ export function createPageTranslation({
     if (mode === 'translation') original.setAttribute(hiddenAttribute, '');
     else original.removeAttribute(hiddenAttribute);
     translation.hidden = mode === 'original';
+    translation.dataset.lingoDisplay = mode;
   }
 
   function removeTranslations() {
@@ -234,6 +251,7 @@ export function createPageTranslation({
     for (const original of insertedTranslations.keys()) {
       original.removeAttribute(HIDDEN_ATTRIBUTE);
       original.removeAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE);
+      original.removeAttribute(SOURCE_ATTRIBUTE);
     }
     insertedTranslations.clear();
   }
@@ -243,6 +261,7 @@ export function createPageTranslation({
     insertedTranslations.delete(original);
     original.removeAttribute(HIDDEN_ATTRIBUTE);
     original.removeAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE);
+    original.removeAttribute(SOURCE_ATTRIBUTE);
   }
 
   function refreshChangedContent(roots: Element[], rechecked: Element[] = []) {
@@ -264,7 +283,6 @@ export function createPageTranslation({
             composedContains(root, element) || composedContains(element, root),
         );
       let eligible = !detached;
-      let cellFontSize: string | undefined;
       if (eligible && checkEligibility) {
         // Temporarily remove our display flag while evaluating the page's own
         // visibility. Restore it synchronously, without repainting or replacing DOM.
@@ -274,9 +292,6 @@ export function createPageTranslation({
         if (cellHidden) element.removeAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE);
         eligible =
           canTranslateContent(element) && !excludedByRules(element, selectors);
-        if (eligible && isTableCell(element))
-          cellFontSize =
-            document.defaultView?.getComputedStyle(element).fontSize;
         if (hidden) element.setAttribute(HIDDEN_ATTRIBUTE, '');
         if (cellHidden) element.setAttribute(TABLE_CELL_HIDDEN_ATTRIBUTE, '');
       }
@@ -289,7 +304,6 @@ export function createPageTranslation({
           candidate.preservedElements = encoded.preservedElements;
           const translation = insertedTranslations.get(element);
           if (translation) {
-            if (cellFontSize) translation.style.fontSize = cellFontSize;
             if (changed && candidate.translatedText) {
               translation.replaceChildren();
               renderTranslatedContent(
@@ -314,6 +328,8 @@ export function createPageTranslation({
                   translation.setAttribute(attribute.name, attribute.value);
               }
             }
+            applyTranslationAppearance(element, translation, appearance);
+            applyUnitDisplayMode(element, translation, current.displayMode);
           }
         }
         continue;
@@ -413,12 +429,8 @@ export function createPageTranslation({
         const translation = tableCell
           ? document.createElement('div')
           : cloneTranslationShell(candidate.element);
-        if (tableCell) {
-          translation.style.fontSize =
-            document.defaultView?.getComputedStyle(candidate.element)
-              .fontSize || '1rem';
-        }
         translation.setAttribute(TRANSLATION_ATTRIBUTE, candidate.id);
+        applyTranslationAppearance(candidate.element, translation, appearance);
         translation.lang = options.targetLanguage;
         renderTranslatedContent(
           translation,
@@ -430,6 +442,7 @@ export function createPageTranslation({
           candidate.element.append(translation);
         } else {
           candidate.element.after(translation);
+          candidate.element.setAttribute(SOURCE_ATTRIBUTE, '');
         }
         candidate.translatedText = text;
         insertedTranslations.set(candidate.element, translation);
@@ -704,6 +717,10 @@ export function createPageTranslation({
   }
 
   function observePage() {
+    colorSchemeQuery = document.defaultView?.matchMedia?.(
+      '(prefers-color-scheme: dark)',
+    );
+    colorSchemeQuery?.addEventListener('change', refreshAppearance);
     observer = new MutationObserver((records) => {
       const changes = records.filter((record) => {
         const target =
@@ -938,6 +955,8 @@ export function createPageTranslation({
       invalidatedRoots.clear();
       observer?.disconnect();
       clearInterval(shadowDiscoveryTimer);
+      colorSchemeQuery?.removeEventListener('change', refreshAppearance);
+      colorSchemeQuery = undefined;
       observedRoots.clear();
       for (const style of shadowStyles) style.remove();
       shadowStyles.clear();
@@ -969,6 +988,10 @@ export function createPageTranslation({
     snapshot() {
       return current;
     },
+    updateAppearance(next) {
+      appearance = resolveTranslationAppearance(next);
+      refreshAppearance();
+    },
   };
 }
 
@@ -982,7 +1005,13 @@ function errorCategory(error: unknown): string {
 }
 
 function isBlockingCategory(category: string): boolean {
-  return ['authentication', 'quota', 'rate-limit'].includes(category);
+  return [
+    'authentication',
+    'quota',
+    'rate-limit',
+    'unsupported',
+    'language-pack',
+  ].includes(category);
 }
 
 function isGloballyPaused(snapshot: SessionSnapshot): boolean {
@@ -1219,6 +1248,7 @@ function cloneTranslationShell(source: HTMLElement): HTMLElement {
       attribute.name === 'hidden' ||
       attribute.name === HIDDEN_ATTRIBUTE ||
       attribute.name === TRANSLATION_ATTRIBUTE ||
+      attribute.name === SOURCE_ATTRIBUTE ||
       attribute.name.startsWith('on')
     ) {
       clone.removeAttribute(attribute.name);

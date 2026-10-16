@@ -35,6 +35,14 @@ export type ProviderCapabilities = {
   supportsNativeGlossary: boolean;
   supportsStructuredOutput: boolean;
   supportsStreaming: boolean;
+  requestPolicy?: RequestPolicy;
+};
+
+/** Per-service limits; unset values use the orchestrator defaults. */
+export type RequestPolicy = {
+  concurrency?: number;
+  minIntervalMs?: number;
+  timeoutMs?: number;
 };
 
 export type TranslationProvider = {
@@ -257,7 +265,7 @@ async function translateUnits(
     let blockingFailure: unknown;
     const batchOutcomes = await mapConcurrent(
       batches,
-      maxConcurrentBatches,
+      provider.capabilities.requestPolicy?.concurrency ?? maxConcurrentBatches,
       async (units) => {
         if (blockingFailure) {
           if (
@@ -464,7 +472,7 @@ async function attemptBatch(
           try {
             return await withTimeout(
               provider.translateBatch({ ...input, signal: network.signal }),
-              timeoutMs,
+              provider.capabilities.requestPolicy?.timeoutMs ?? timeoutMs,
               sharedSignal,
               () => network.abort(new Error('Translation request timed out.')),
             );

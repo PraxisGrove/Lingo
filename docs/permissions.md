@@ -14,6 +14,21 @@ all recognized content, or restore the original page. Selection and editable-fie
 menus trigger explicit text translation in the corresponding frame. Password
 and payment fields remain excluded. Menu activity outside these commands is not read.
 
+## `sidePanel` (Chromium)
+
+Lingo opens a persistent browser side panel when the reader clicks the toolbar
+icon. It contains translation controls and follows the active webpage; it does
+not inject a floating sidebar into the page. This permission only enables the
+Chromium panel UI. Firefox uses its native `sidebar_action` without this permission.
+
+## `offscreen` (Chromium)
+
+When the reader chooses browser on-device translation, the background worker
+opens a hidden extension page to run the browser's built-in Translator and
+LanguageDetector APIs, which service workers cannot access. Page text is passed
+only between extension contexts and is translated on the device; no network
+request carries it. Firefox builds omit this permission and the option.
+
 ## `<all_urls>`
 
 Lingo needs host access to identify translatable content, present translations,

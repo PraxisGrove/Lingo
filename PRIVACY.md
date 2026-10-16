@@ -35,7 +35,19 @@ the browser profile.
 ## Translation Data Flow
 
 Credentials remain in local extension storage and are not exposed to webpages
-or content scripts. Lingo will not silently send content to a different service.
+or content scripts. With browser on-device translation, page text is
+translated by the browser on this device and is not sent to any service;
+the browser itself downloads the language packs.
+
+Custom request headers are sent only to the service they are configured for.
+Header values marked secret are stored with provider credentials in local
+extension storage and are excluded from settings, diagnostics, and cache keys.
+
+Vocabulary highlighting is off by default. When enabled, rare English words
+are identified on this device with a bundled word list. A word is sent to the
+active translation service only when the reader hovers it, or the surrounding
+sentence when the reader asks for its meaning in context. Known words and the
+wordbook stay in local extension storage. Lingo will not silently send content to a different service.
 
 Password, payment, editor, and `translate="no"` regions are outside normal
 webpage translation. Translation cache entries remain local and will not

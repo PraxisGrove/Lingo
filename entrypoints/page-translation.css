@@ -1,22 +1,60 @@
+/* biome-ignore-all lint/complexity/noImportantStyles: Display and translation spacing must override arbitrary host-page rules, including copied inline styles. */
+/* Keep each source and translation together without changing the page's font. */
 [data-lingo-translation] {
-  border-inline-start: 3px solid #dc2626;
-  color: #374151;
-  margin-block: 0.55em 1em;
-  padding-inline-start: 0.8em;
+  margin-block-end: var(--lingo-source-margin-after, 0) !important;
 }
 
-[data-lingo-hidden] {
-  display: none;
+[data-lingo-source]:has(
+  + [data-lingo-translation][data-lingo-display="bilingual"]:not([hidden])
+) {
+  margin-block-end: 0 !important;
+}
+
+[data-lingo-translation][data-lingo-display="bilingual"] {
+  margin-block-start: var(--lingo-paragraph-gap, 0.35em) !important;
+}
+
+[data-lingo-translation][data-lingo-display="bilingual"][data-lingo-layout="heading"] {
+  margin-block-start: calc(
+    var(--lingo-paragraph-gap, 0.35em) *
+    0.65
+  ) !important;
+}
+
+[data-lingo-translation][data-lingo-display="bilingual"][data-lingo-layout="compact"] {
+  margin-block-start: calc(var(--lingo-paragraph-gap, 0.35em) * 0.7) !important;
+}
+
+[data-lingo-translation][data-lingo-display="bilingual"][data-lingo-separator="line"],
+[data-lingo-translation][data-lingo-display="bilingual"][data-lingo-separator="dashed"] {
+  border-block-start: 1px solid
+    color-mix(in srgb, currentColor 22%, transparent) !important;
+  padding-block-start: var(--lingo-paragraph-gap, 0.35em) !important;
+}
+
+[data-lingo-translation][data-lingo-display="bilingual"][data-lingo-separator="dashed"] {
+  border-block-start-style: dashed !important;
+}
+
+[data-lingo-translation][data-lingo-display="bilingual"][data-lingo-separator="border"] {
+  border-inline-start: 1px solid
+    color-mix(in srgb, currentColor 25%, transparent) !important;
+  padding-inline-start: 0.7em !important;
+}
+
+[data-lingo-hidden],
+[data-lingo-translation][hidden] {
+  display: none !important;
 }
 
 td[data-lingo-cell-original-hidden],
 th[data-lingo-cell-original-hidden] {
-  font-size: 0;
+  font-size: 0 !important;
 }
 
 td[data-lingo-cell-original-hidden] > :not([data-lingo-translation]),
 th[data-lingo-cell-original-hidden] > :not([data-lingo-translation]) {
-  display: none;
+  display: none !important;
 }
 
 li[data-lingo-translation] {

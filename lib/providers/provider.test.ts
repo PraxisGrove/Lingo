@@ -92,6 +92,47 @@ describe.each(cases)('$profile.provider provider contract', ({
 });
 
 describe('provider errors', () => {
+  it.each([
+    'http://localhost:11434/v1',
+    'http://127.0.0.1:11434/v1',
+    'http://[::1]:11434/v1',
+  ])('translates with a local model at %s without sending an API key', async (endpoint) => {
+    const fetcher = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response(JSON.stringify(cases[0].response)));
+    await createProvider(
+      { ...cases[0].profile, endpoint, model: 'qwen3:8b' },
+      '',
+      fetcher,
+    ).translateBatch({
+      sourceLanguage: 'en',
+      targetLanguage: 'es',
+      quality: resolveTranslationQuality(),
+      units: [{ id: '1', number: 1, text: 'Hello' }],
+    });
+    expect(fetcher.mock.calls[0]?.[1]?.headers).not.toHaveProperty(
+      'authorization',
+    );
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)).model).toBe(
+      'qwen3:8b',
+    );
+  });
+
+  it('keeps credentials required for cloud models and native translation APIs', () => {
+    expect(() => createProvider(cases[0].profile, '')).toThrow(
+      'A provider credential is required.',
+    );
+    expect(() =>
+      createProvider({ ...cases[1].profile, endpoint: 'http://localhost' }, ''),
+    ).toThrow('A provider credential is required.');
+    expect(() =>
+      createProvider(
+        { ...cases[0].profile, endpoint: 'https://localhost.other.example/v1' },
+        '',
+      ),
+    ).toThrow('A provider credential is required.');
+  });
+
   it('rejects a DeepL glossary with automatic source before sending text', async () => {
     const fetcher = vi.fn<typeof globalThis.fetch>();
     const provider = createProvider(
@@ -285,12 +326,148 @@ describe('provider errors', () => {
   });
 
   it('tests a connection with fixed text rather than page content', async () => {
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValue(
-        new Response(JSON.stringify(cases[0].response), { status: 200 }),
-      );
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  '{"translations":[{"id":"connection-test","text":"Hola"}]}',
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
     await createProvider(cases[0].profile, 'secret', fetch).testConnection();
     expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain('Hello');
+  });
+
+  it.each([
+    { translations: [] },
+    { translations: [{ id: 'wrong-id', text: 'Hola' }] },
+    { translations: [{ id: 'connection-test', text: ' ' }] },
+    {
+      translations: [
+        { id: 'connection-test', text: 'Hola' },
+        { id: 'extra', text: 'Extra' },
+      ],
+    },
+  ])('rejects empty, unrelated or blank test translations before reporting a healthy connection', async (body) => {
+    const fetcher = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(body) } }],
+        }),
+      ),
+    );
+    await expect(
+      createProvider(cases[0].profile, 'fixture-key', fetcher).testConnection(),
+    ).rejects.toMatchObject({ category: 'invalid-response' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('provider tuning', () => {
+  it('turns a profile rate limit into request spacing and caps batch size', () => {
+    const provider = createProvider(
+      {
+        id: 'tuned',
+        name: 'Free tier',
+        provider: 'openai-compatible',
+        model: 'm',
+        tuning: {
+          concurrency: 1,
+          requestsPerMinute: 15,
+          timeoutSeconds: 60,
+          maxBatchSize: 500,
+          maxBatchCharacters: 3000,
+        },
+      },
+      'key',
+    );
+    expect(provider.capabilities).toMatchObject({
+      maxBatchSize: 50,
+      maxBatchCharacters: 3000,
+      requestPolicy: { concurrency: 1, minIntervalMs: 4000, timeoutMs: 60_000 },
+    });
+  });
+});
+
+describe('gateway requests', () => {
+  const ok = () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                translations: [{ id: 'connection-test', text: 'Hola' }],
+              }),
+            },
+          },
+        ],
+      }),
+    );
+
+  it('sends Azure-style deployments with api-key auth, query, and custom headers', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(ok());
+    await createProvider(
+      {
+        id: 'azure',
+        name: 'Azure OpenAI',
+        provider: 'openai-compatible',
+        endpoint:
+          'https://r.openai.azure.com/openai/deployments/gpt?api-version=2024-10-21',
+        model: 'gpt',
+        credentialHeader: 'api-key',
+        headers: [
+          { name: 'X-Plain', value: 'visible' },
+          { name: 'X-Gateway-Token' },
+        ],
+      },
+      'azure-key',
+      fetcher,
+      { 'x-gateway-token': 'secret-token' },
+    ).testConnection();
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe(
+      'https://r.openai.azure.com/openai/deployments/gpt/chat/completions?api-version=2024-10-21',
+    );
+    expect(init?.headers).toMatchObject({
+      'api-key': 'azure-key',
+      'X-Plain': 'visible',
+      'X-Gateway-Token': 'secret-token',
+      'content-type': 'application/json',
+    });
+    expect(init?.headers).not.toHaveProperty('authorization');
+  });
+
+  it('rejects secrets placed in the endpoint query and queries for MT services', () => {
+    expect(() =>
+      createProvider(
+        {
+          id: 'leaky',
+          name: 'Leaky',
+          provider: 'openai-compatible',
+          endpoint: 'https://gw.example/v1?api_key=abc',
+          model: 'm',
+        },
+        'key',
+      ),
+    ).toThrow(ProviderError);
+    expect(() =>
+      createProvider(
+        {
+          id: 'deepl',
+          name: 'DeepL',
+          provider: 'deepl',
+          endpoint: 'https://api.deepl.com?x=1',
+        },
+        'key',
+      ),
+    ).toThrow(ProviderError);
   });
 });

@@ -122,6 +122,7 @@ describe('automatic translation starter', () => {
 
 function pageTranslation(starts: StartSessionOptions[]): PageTranslation {
   return {
+    updateAppearance: () => {},
     start: async (options) => {
       starts.push(options);
       return {

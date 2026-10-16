@@ -58,4 +58,21 @@ describe('resolvePopupNotice', () => {
       detail: 'Balance exhausted.',
     });
   });
+
+  it('sends readers to download a missing on-device language pack', () => {
+    const configured = {
+      ...DEFAULT_SETTINGS,
+      activeProviderProfileId: 'device',
+      providerProfiles: [
+        { id: 'device', name: 'On-device', provider: 'built-in' as const },
+      ],
+    };
+    expect(
+      resolvePopupNotice(configured, true, {
+        ...READY_PAGE,
+        status: 'failed',
+        failure: { category: 'language-pack', message: 'Missing pack' },
+      }),
+    ).toMatchObject({ kind: 'language-pack', action: 'open-settings' });
+  });
 });

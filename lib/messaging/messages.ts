@@ -4,8 +4,19 @@ import type {
   DisplayMode,
   SessionSnapshot as PageTranslationSnapshot,
 } from '@/lib/page-translation/page-translation';
-import type { ProviderProfile } from '@/lib/storage/settings-model';
+import type { ProviderModelResult } from '@/lib/providers/model-discovery';
+import { isProviderIconPreference } from '@/lib/providers/provider-icon-model';
+import {
+  MAX_CUSTOM_HEADERS,
+  resolveCustomHeaders,
+  validHeaderValue,
+} from '@/lib/providers/request-options';
+import {
+  PROVIDER_TUNING_LIMITS,
+  type ProviderProfile,
+} from '@/lib/storage/settings-model';
 import type { TextAction } from '@/lib/ui/text-tools';
+import type { RankedWord } from '@/lib/vocabulary/word-ranks';
 
 export type MessageSource = 'popup' | 'options' | 'content';
 
@@ -61,12 +72,16 @@ export type ExtensionMessages = {
     response: PageTranslationSnapshot;
   };
   saveProviderProfile: {
-    request: { profile: ProviderProfile; credential: string };
+    request: ProviderDraftRequest;
     response: { ok: true };
   };
   testProviderConnection: {
-    request: { profile: ProviderProfile; credential: string };
+    request: ProviderDraftRequest;
     response: { ok: true } | { ok: false; category: string; message: string };
+  };
+  listProviderModels: {
+    request: ProviderDraftRequest;
+    response: ProviderModelResult;
   };
   deleteProviderProfile: {
     request: { profileId: string };
@@ -87,6 +102,19 @@ export type ExtensionMessages = {
     request: Record<string, never>;
     response: DiagnosticReport;
   };
+  classifyWords: {
+    request: { words: string[] };
+    response: { ranks: Record<string, RankedWord | null> };
+  };
+};
+
+export const MAX_CLASSIFIED_WORDS = 2000;
+
+export type ProviderDraftRequest = {
+  profile: ProviderProfile;
+  credential: string;
+  /** Secret header values by header name; never stored in settings. */
+  headerSecrets?: Record<string, string>;
 };
 
 export type MessageName = keyof ExtensionMessages;
@@ -171,16 +199,27 @@ export function isExtensionMessage(
           typeof message.payload.retryFailed === 'boolean')
       );
     case 'saveProviderProfile':
-      return (
-        isRecordWithKeys(message.payload, ['profile', 'credential']) &&
-        isProviderProfile(message.payload.profile) &&
-        typeof message.payload.credential === 'string'
-      );
     case 'testProviderConnection':
+    case 'listProviderModels':
       return (
-        isRecordWithKeys(message.payload, ['profile', 'credential']) &&
+        isRecordWithRequiredAndOptionalKeys(
+          message.payload,
+          ['profile', 'credential'],
+          ['headerSecrets'],
+        ) &&
         isProviderProfile(message.payload.profile) &&
-        typeof message.payload.credential === 'string'
+        typeof message.payload.credential === 'string' &&
+        (message.payload.headerSecrets === undefined ||
+          isHeaderSecrets(message.payload.headerSecrets))
+      );
+    case 'classifyWords':
+      return (
+        isRecordWithKeys(message.payload, ['words']) &&
+        Array.isArray(message.payload.words) &&
+        message.payload.words.length <= MAX_CLASSIFIED_WORDS &&
+        message.payload.words.every(
+          (word) => typeof word === 'string' && /^[a-z-]{1,64}$/.test(word),
+        )
       );
     case 'deleteProviderProfile':
       return (
@@ -192,6 +231,20 @@ export function isExtensionMessage(
   }
 }
 
+function isHeaderSecrets(value: unknown): value is Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return (
+    entries.length <= MAX_CUSTOM_HEADERS &&
+    entries.every(
+      ([name, secret]) =>
+        resolveCustomHeaders([{ name }]).length === 1 &&
+        typeof secret === 'string' &&
+        validHeaderValue(secret),
+    )
+  );
+}
+
 function isProviderProfile(value: unknown): value is ProviderProfile {
   if (value == null || typeof value !== 'object') return false;
   const profile = value as Record<string, unknown>;
@@ -200,15 +253,82 @@ function isProviderProfile(value: unknown): value is ProviderProfile {
     'model',
     'region',
     'nativeGlossaryId',
+    'models',
+    'modelSelection',
+    'icon',
+    'tuning',
+    'headers',
+    'credentialHeader',
   ].filter((key) => key in profile);
   return (
     isRecordWithKeys(profile, ['id', 'name', 'provider', ...optionalKeys]) &&
     typeof profile.id === 'string' &&
     typeof profile.name === 'string' &&
-    ['openai-compatible', 'deepl', 'google-cloud', 'azure-translator'].includes(
-      profile.provider as string,
-    ) &&
-    optionalKeys.every((key) => typeof profile[key] === 'string')
+    [
+      'openai-compatible',
+      'openai-responses',
+      'anthropic',
+      'gemini',
+      'deepl',
+      'google-cloud',
+      'azure-translator',
+      'built-in',
+    ].includes(profile.provider as string) &&
+    optionalKeys.every((key) => {
+      if (key === 'headers')
+        return (
+          Array.isArray(profile.headers) &&
+          resolveCustomHeaders(profile.headers).length ===
+            profile.headers.length
+        );
+      if (key === 'credentialHeader')
+        return profile.credentialHeader === 'api-key';
+      if (key === 'tuning')
+        return (
+          typeof profile.tuning === 'object' &&
+          profile.tuning !== null &&
+          !Array.isArray(profile.tuning) &&
+          Object.entries(profile.tuning).every(
+            ([name, value]) =>
+              name in PROVIDER_TUNING_LIMITS &&
+              typeof value === 'number' &&
+              Number.isFinite(value),
+          )
+        );
+      if (key === 'icon')
+        return (
+          profile.icon === undefined || isProviderIconPreference(profile.icon)
+        );
+      if (key === 'models')
+        return (
+          Array.isArray(profile.models) &&
+          profile.models.length <= 1000 &&
+          profile.models.every(
+            (model) =>
+              isRecordWithRequiredAndOptionalKeys(
+                model,
+                ['id', 'name'],
+                ['protocols'],
+              ) &&
+              typeof model.id === 'string' &&
+              typeof model.name === 'string' &&
+              (model.protocols === undefined ||
+                (Array.isArray(model.protocols) &&
+                  model.protocols.every((protocol) =>
+                    [
+                      'openai-compatible',
+                      'openai-responses',
+                      'anthropic',
+                    ].includes(protocol as string),
+                  ))),
+          )
+        );
+      if (key === 'modelSelection')
+        return ['recommended', 'manual'].includes(
+          profile.modelSelection as string,
+        );
+      return typeof profile[key] === 'string';
+    })
   );
 }
 

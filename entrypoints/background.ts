@@ -15,9 +15,12 @@ import {
   serveTranslationPort,
   TRANSLATION_PORT_NAME,
 } from '@/lib/messaging/translation-port';
+import { createOffscreenEngine } from '@/lib/providers/offscreen-client';
 import {
   deleteProviderProfile,
   getActiveProviderChain,
+  listProviderModels,
+  registerBuiltInEngine,
   saveProviderProfile,
   testProviderProfile,
 } from '@/lib/providers/provider-service';
@@ -30,9 +33,18 @@ import {
 } from '@/lib/storage/settings';
 import { createTranslationOrchestrator } from '@/lib/translation/orchestrator';
 import { resolveRequestQuality } from '@/lib/translation/request-quality';
+import { createRankService } from '@/lib/vocabulary/rank-service';
 
 export default defineBackground(() => {
   const logger = createLogger('background');
+  const classifyWords = createRankService(async () => {
+    const response = await fetch(
+      browser.runtime.getURL('/vocabulary/en-ranks.txt'),
+    );
+    return response.text();
+  });
+  if (import.meta.env.BROWSER !== 'firefox')
+    registerBuiltInEngine(createOffscreenEngine());
   const translationLogger = createLogger('translation');
   const translationCache = createTranslationCache();
   const orchestrator = createTranslationOrchestrator(getActiveProviderChain, {
@@ -75,6 +87,24 @@ export default defineBackground(() => {
   });
 
   logger.info('Background service worker started.');
+  if (import.meta.env.BROWSER === 'firefox') {
+    const firefox = browser as typeof browser & {
+      sidebarAction: { toggle(): Promise<void> };
+    };
+    browser.browserAction.onClicked.addListener(() => {
+      void firefox.sidebarAction
+        .toggle()
+        .catch((error) =>
+          logger.warn('Could not open the reading sidebar.', { error }),
+        );
+    });
+  } else {
+    void browser.sidePanel
+      .setPanelBehavior({ openPanelOnActionClick: true })
+      .catch((error) =>
+        logger.warn('Could not configure the reading side panel.', { error }),
+      );
+  }
   void updateRuleSubscription().catch((error) =>
     logger.warn('Community rule check failed; keeping verified rules.', {
       error,
@@ -193,6 +223,8 @@ export default defineBackground(() => {
         await saveProviderProfile(
           message.payload.profile,
           message.payload.credential,
+          undefined,
+          message.payload.headerSecrets,
         );
         return { ok: true as const };
       })();
@@ -203,6 +235,8 @@ export default defineBackground(() => {
         const result = await testProviderProfile(
           message.payload.profile,
           message.payload.credential,
+          undefined,
+          message.payload.headerSecrets,
         );
         if (!result.ok) {
           logger.warn('Provider connection test failed.', {
@@ -213,6 +247,18 @@ export default defineBackground(() => {
         }
         return result;
       })();
+    }
+
+    if (message.type === 'classifyWords')
+      return classifyWords(message.payload.words).then((ranks) => ({ ranks }));
+
+    if (message.type === 'listProviderModels') {
+      return listProviderModels(
+        message.payload.profile,
+        message.payload.credential,
+        undefined,
+        message.payload.headerSecrets,
+      );
     }
 
     if (message.type === 'deleteProviderProfile') {

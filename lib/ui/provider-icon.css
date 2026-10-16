@@ -1,0 +1,12 @@
+.provider-icon {
+  color: #171a17;
+  display: block;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.provider-icon[data-provider="moonshot"] {
+  background: #111111;
+  border-radius: 4px;
+  padding: 2px;
+}

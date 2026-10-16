@@ -8,6 +8,27 @@ import {
   type UiLocalePreference,
 } from '../i18n/locales';
 import {
+  DEFAULT_TRANSLATION_APPEARANCE,
+  resolveTranslationAppearance,
+  type TranslationAppearance,
+} from '../page-translation/appearance';
+import type { ModelProtocol } from '../providers/model-protocols';
+import {
+  type ProviderIconPreference,
+  parseProviderIconPreference,
+} from '../providers/provider-icon-model';
+import {
+  type CustomHeader,
+  resolveCustomHeaders,
+} from '../providers/request-options';
+
+const MODEL_PROTOCOLS: ModelProtocol[] = [
+  'openai-compatible',
+  'openai-responses',
+  'anthropic',
+];
+
+import {
   DEFAULT_TRANSLATION_QUALITY,
   type GlossaryEntry,
   resolveTranslationQuality,
@@ -16,13 +37,27 @@ import {
 
 export type ExtensionTheme = 'system' | 'light' | 'dark';
 
-export const CURRENT_SETTINGS_SCHEMA_VERSION = 9 as const;
+export const CURRENT_SETTINGS_SCHEMA_VERSION = 13 as const;
+
+export type { ProviderIconPreference } from '../providers/provider-icon-model';
+export type { CustomHeader } from '../providers/request-options';
 
 export type ProviderKind =
   | 'openai-compatible'
+  | 'openai-responses'
+  | 'anthropic'
+  | 'gemini'
   | 'deepl'
   | 'google-cloud'
-  | 'azure-translator';
+  | 'azure-translator'
+  | 'built-in';
+
+export type ProviderModel = {
+  id: string;
+  name: string;
+  /** Protocols a gateway reports for this model; absent when unknown. */
+  protocols?: ModelProtocol[];
+};
 
 export type ProviderProfile = {
   id: string;
@@ -30,9 +65,52 @@ export type ProviderProfile = {
   provider: ProviderKind;
   endpoint?: string;
   model?: string;
+  models?: ProviderModel[];
+  modelSelection?: 'recommended' | 'manual';
   region?: string;
   nativeGlossaryId?: string;
+  icon?: ProviderIconPreference;
+  tuning?: ProviderTuning;
+  /** Gateway headers; secret values are kept in the credential store. */
+  headers?: CustomHeader[];
+  /** Azure OpenAI and some gateways expect `api-key` instead of Bearer. */
+  credentialHeader?: 'api-key';
 };
+
+export type ProviderTuning = {
+  concurrency?: number;
+  requestsPerMinute?: number;
+  timeoutSeconds?: number;
+  maxBatchSize?: number;
+  maxBatchCharacters?: number;
+};
+
+export const PROVIDER_TUNING_LIMITS: Record<
+  keyof ProviderTuning,
+  [min: number, max: number]
+> = {
+  concurrency: [1, 16],
+  requestsPerMinute: [1, 6000],
+  timeoutSeconds: [5, 180],
+  maxBatchSize: [1, 100],
+  maxBatchCharacters: [500, 50_000],
+};
+
+export function resolveProviderTuning(
+  value: unknown,
+): ProviderTuning | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const tuning: ProviderTuning = {};
+  for (const [key, [min, max]] of Object.entries(PROVIDER_TUNING_LIMITS)) {
+    const number = (value as Record<string, unknown>)[key];
+    if (typeof number === 'number' && Number.isFinite(number))
+      tuning[key as keyof ProviderTuning] = Math.min(
+        max,
+        Math.max(min, Math.round(number)),
+      );
+  }
+  return Object.keys(tuning).length > 0 ? tuning : undefined;
+}
 
 export type ExtensionSettings = {
   schemaVersion: typeof CURRENT_SETTINGS_SCHEMA_VERSION;
@@ -48,6 +126,7 @@ export type ExtensionSettings = {
   floatingButtonEnabled: boolean;
   selectionButtonEnabled: boolean;
   translationQuality: TranslationQualitySettings;
+  translationAppearance: TranslationAppearance;
   siteGlossaries: Record<string, GlossaryEntry[]>;
   autoTranslation: AutoTranslationPreferences;
   setupCompleted: boolean;
@@ -67,6 +146,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   floatingButtonEnabled: false,
   selectionButtonEnabled: true,
   translationQuality: DEFAULT_TRANSLATION_QUALITY,
+  translationAppearance: DEFAULT_TRANSLATION_APPEARANCE,
   siteGlossaries: {},
   autoTranslation: {
     enabled: true,
@@ -94,6 +174,10 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
     candidate.schemaVersion !== 6 &&
     candidate.schemaVersion !== 7 &&
     candidate.schemaVersion !== 8 &&
+    candidate.schemaVersion !== 9 &&
+    candidate.schemaVersion !== 10 &&
+    candidate.schemaVersion !== 11 &&
+    candidate.schemaVersion !== 12 &&
     candidate.schemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION
   ) {
     return DEFAULT_SETTINGS;
@@ -154,6 +238,9 @@ export function resolveSettings(value?: unknown): ExtensionSettings {
         ? candidate.selectionButtonEnabled
         : DEFAULT_SETTINGS.selectionButtonEnabled,
     translationQuality: resolveQualitySettings(candidate.translationQuality),
+    translationAppearance: resolveTranslationAppearance(
+      candidate.translationAppearance,
+    ),
     siteGlossaries: resolveSiteGlossaries(candidate.siteGlossaries),
     autoTranslation: resolveAutoTranslation(candidate.autoTranslation),
     setupCompleted: candidate.setupCompleted === true,
@@ -239,9 +326,13 @@ function resolveSourceLanguagePolicy(value: unknown): SourceLanguagePolicy {
 
 const PROVIDER_KINDS: ProviderKind[] = [
   'openai-compatible',
+  'openai-responses',
+  'anthropic',
+  'gemini',
   'deepl',
   'google-cloud',
   'azure-translator',
+  'built-in',
 ];
 
 function resolveProviderProfile(value: unknown): ProviderProfile[] {
@@ -257,6 +348,9 @@ function resolveProviderProfile(value: unknown): ProviderProfile[] {
     return [];
   }
 
+  const icon = parseProviderIconPreference(profile.icon);
+  const tuning = resolveProviderTuning(profile.tuning);
+  const headers = resolveCustomHeaders(profile.headers);
   return [
     {
       id: profile.id,
@@ -264,10 +358,54 @@ function resolveProviderProfile(value: unknown): ProviderProfile[] {
       provider: profile.provider as ProviderKind,
       ...optionalString(profile, 'endpoint'),
       ...optionalString(profile, 'model'),
+      ...(Array.isArray(profile.models)
+        ? { models: normalizeProviderModels(profile.models) }
+        : {}),
+      ...(profile.modelSelection === 'recommended' ||
+      profile.modelSelection === 'manual'
+        ? { modelSelection: profile.modelSelection }
+        : {}),
       ...optionalString(profile, 'region'),
       ...optionalString(profile, 'nativeGlossaryId'),
+      ...(icon ? { icon } : {}),
+      ...(tuning ? { tuning } : {}),
+      ...(headers.length ? { headers } : {}),
+      ...(profile.credentialHeader === 'api-key'
+        ? { credentialHeader: 'api-key' as const }
+        : {}),
     },
   ];
+}
+
+export function normalizeProviderModels(value: unknown[]): ProviderModel[] {
+  const models = new Map<string, ProviderModel>();
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const item = candidate as Record<string, unknown>;
+    if (typeof item.id !== 'string') continue;
+    const id = item.id.trim();
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._:/+@-]{0,255}$/.test(id)) continue;
+    const name =
+      typeof item.name === 'string'
+        ? item.name
+            .replace(/[\p{Cc}\p{Cf}]/gu, '')
+            .trim()
+            .slice(0, 200)
+        : '';
+    const protocols = Array.isArray(item.protocols)
+      ? MODEL_PROTOCOLS.filter((protocol) =>
+          (item.protocols as unknown[]).includes(protocol),
+        )
+      : [];
+    if (!models.has(id))
+      models.set(id, {
+        id,
+        name: name || id,
+        ...(protocols.length ? { protocols } : {}),
+      });
+    if (models.size >= 1000) break;
+  }
+  return [...models.values()];
 }
 
 function optionalString(

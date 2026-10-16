@@ -85,4 +85,35 @@ describe('worker-wide request control', () => {
     ]);
     expect(run).toHaveBeenCalledTimes(2);
   });
+
+  it('applies each service its own concurrency instead of the shared default', async () => {
+    const execute = createRequestControl(4, 0);
+    const limited: TranslationProvider = {
+      ...provider,
+      id: 'free-tier',
+      capabilities: {
+        ...provider.capabilities,
+        requestPolicy: { concurrency: 1 },
+      },
+    };
+    let active = 0;
+    let peak = 0;
+    const run = async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return [];
+    };
+    await Promise.all(
+      ['a', 'b', 'c'].map((id) =>
+        execute(
+          limited,
+          { ...input(id), units: [{ id, number: 1, text: id }] },
+          run,
+        ),
+      ),
+    );
+    expect(peak).toBe(1);
+  });
 });

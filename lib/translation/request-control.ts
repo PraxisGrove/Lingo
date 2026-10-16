@@ -6,6 +6,8 @@ import type {
 
 type Job = { signal: AbortSignal; run(): Promise<void> };
 type Queue = {
+  concurrency: number;
+  intervalMs: number;
   active: number;
   nextStart: number;
   jobs: Job[];
@@ -28,7 +30,7 @@ export function createRequestControl(concurrency = 2, intervalMs = 125) {
   function drain(queue: Queue) {
     clearTimeout(queue.timer);
     queue.jobs = queue.jobs.filter((job) => !job.signal.aborted);
-    if (!queue.jobs.length || queue.active >= concurrency) return;
+    if (!queue.jobs.length || queue.active >= queue.concurrency) return;
     const delay = queue.nextStart - Date.now();
     if (delay > 0) {
       queue.timer = setTimeout(() => drain(queue), delay);
@@ -37,7 +39,7 @@ export function createRequestControl(concurrency = 2, intervalMs = 125) {
     const job = queue.jobs.shift();
     if (!job) return;
     queue.active += 1;
-    queue.nextStart = Date.now() + intervalMs;
+    queue.nextStart = Date.now() + queue.intervalMs;
     void job.run().finally(() => {
       queue.active -= 1;
       drain(queue);
@@ -91,11 +93,16 @@ export function createRequestControl(concurrency = 2, intervalMs = 125) {
       let flight = flights.get(key);
       if (!flight || flight.controller.signal.aborted) {
         const controller = new AbortController();
+        const policy = provider.capabilities.requestPolicy;
         const queue = queues.get(providerId) ?? {
+          concurrency,
+          intervalMs,
           active: 0,
           nextStart: 0,
           jobs: [],
         };
+        queue.concurrency = Math.max(1, policy?.concurrency ?? concurrency);
+        queue.intervalMs = Math.max(0, policy?.minIntervalMs ?? intervalMs);
         queues.set(providerId, queue);
         const promise = new Promise<ProviderBatchResult>((resolve, reject) => {
           const onAbort = () => {

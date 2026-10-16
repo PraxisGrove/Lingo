@@ -7,7 +7,114 @@ import type {
   ProviderBatchResult,
   TranslationProvider,
 } from '../translation/orchestrator';
-import { createProvider, ProviderError } from './provider';
+import { createBuiltInProvider } from './built-in-provider';
+import type { BuiltInTranslationEngine } from './built-in-translator';
+import {
+  discoverProviderModelCatalog,
+  ProviderModelError,
+  type ProviderModelResult,
+} from './model-discovery';
+import {
+  type ConfiguredTranslationProvider,
+  createProvider,
+  ProviderError,
+} from './provider';
+
+let builtInEngine: BuiltInTranslationEngine | undefined;
+
+export function registerBuiltInEngine(engine: BuiltInTranslationEngine) {
+  builtInEngine = engine;
+}
+
+export function createConfiguredProvider(
+  profile: ProviderProfile,
+  credential: string,
+  headerSecrets: Record<string, string> = {},
+  engine = builtInEngine,
+): ConfiguredTranslationProvider {
+  if (profile.provider !== 'built-in')
+    return createProvider(profile, credential, fetch, headerSecrets);
+  if (!engine)
+    throw new ProviderError(
+      'unsupported',
+      'This browser does not provide on-device translation.',
+    );
+  return createBuiltInProvider(engine);
+}
+
+/** Draft secrets override saved ones; saved secrets apply only to saved profiles. */
+async function resolveHeaderSecrets(
+  profile: ProviderProfile,
+  draft: Record<string, string>,
+  saved: boolean,
+  getHeaderSecrets: ProviderProfileDependencies['getHeaderSecrets'],
+): Promise<Record<string, string>> {
+  const stored =
+    saved && getHeaderSecrets ? await getHeaderSecrets(profile.id) : {};
+  const merged: Record<string, string> = { ...stored };
+  for (const [name, value] of Object.entries(draft))
+    if (value) merged[name.toLowerCase()] = value;
+  return merged;
+}
+
+export async function listProviderModels(
+  profile: ProviderProfile,
+  credential: string,
+  dependencies?: Pick<
+    ProviderProfileDependencies,
+    'getSettings' | 'getCredential' | 'getHeaderSecrets'
+  > & {
+    fetcher?: typeof fetch;
+    timeoutMs?: number;
+  },
+  headerSecrets: Record<string, string> = {},
+): Promise<ProviderModelResult> {
+  try {
+    const resolved = dependencies ?? (await providerProfileDependencies());
+    const settings = await resolved.getSettings();
+    const saved = settings.providerProfiles.some(
+      (item) => item.id === profile.id,
+    );
+    const stored = saved ? await resolved.getCredential(profile.id) : null;
+    const catalog = await discoverProviderModelCatalog(
+      profile,
+      credential.trim() || stored || '',
+      dependencies?.fetcher,
+      dependencies?.timeoutMs,
+      await resolveHeaderSecrets(
+        profile,
+        headerSecrets,
+        saved,
+        resolved.getHeaderSecrets,
+      ),
+    );
+    return {
+      ok: true,
+      models: catalog.models,
+      ...(profile.endpoint &&
+      catalog.resolvedEndpoint !== profile.endpoint.trim().replace(/\/+$/, '')
+        ? { resolvedEndpoint: catalog.resolvedEndpoint }
+        : {}),
+    };
+  } catch (error) {
+    const failure =
+      error instanceof ProviderError || error instanceof ProviderModelError
+        ? error
+        : new ProviderModelError(
+            'network',
+            'The model catalog could not be reached. Try again or enter a model manually.',
+          );
+    return {
+      ok: false,
+      category: failure.category,
+      message: failure.message,
+      ...(failure.status === undefined ? {} : { status: failure.status }),
+      ...(failure instanceof ProviderModelError && failure.requestUrl
+        ? { requestUrl: failure.requestUrl }
+        : {}),
+    };
+  }
+}
 
 export async function translateWithActiveProvider(
   input: ProviderBatchInput,
@@ -26,7 +133,11 @@ export async function translateWithActiveProvider(
       'Configure a translation service first.',
     );
   const credential = await credentialStore.get(profile.id);
-  return createProvider(profile, credential ?? '').translateBatch({
+  return createConfiguredProvider(
+    profile,
+    credential ?? '',
+    await credentialStore.getHeaderSecrets(profile.id),
+  ).translateBatch({
     ...input,
     sourceLanguage: settings.sourceLanguage,
     targetLanguage: settings.targetLanguage,
@@ -43,6 +154,12 @@ export async function createProviderChain(
   getCredential: (profileId: string) => Promise<string | null> = async (
     profileId,
   ) => (await import('../storage/credentials')).credentialStore.get(profileId),
+  getHeaderSecrets: (
+    profileId: string,
+  ) => Promise<Record<string, string>> = async (profileId) =>
+    (await import('../storage/credentials')).credentialStore.getHeaderSecrets(
+      profileId,
+    ),
 ): Promise<TranslationProvider[]> {
   const profileIds = [
     settings.activeProviderProfileId,
@@ -58,7 +175,11 @@ export async function createProviderChain(
         );
       const credential = await getCredential(profile.id);
       return {
-        ...createProvider(profile, credential ?? ''),
+        ...createConfiguredProvider(
+          profile,
+          credential ?? '',
+          profile.headers?.length ? await getHeaderSecrets(profile.id) : {},
+        ),
         id: await cacheIdentity(profile),
       };
     }),
@@ -78,6 +199,16 @@ async function cacheIdentity(profile: ProviderProfile): Promise<string> {
     profile.model,
     profile.region,
     profile.nativeGlossaryId,
+    // Appended only when set so existing profiles keep their cached entries.
+    ...(profile.credentialHeader || profile.headers?.length
+      ? [
+          profile.credentialHeader,
+          // Names and plain values only; secret values never enter the key.
+          (profile.headers ?? [])
+            .map((header) => [header.name.toLowerCase(), header.value ?? ''])
+            .sort(),
+        ]
+      : []),
   ]);
   const digest = await crypto.subtle.digest(
     'SHA-256',
@@ -92,9 +223,31 @@ async function cacheIdentity(profile: ProviderProfile): Promise<string> {
 export async function testProviderProfile(
   profile: ProviderProfile,
   credential: string,
+  dependencies?: Pick<
+    ProviderProfileDependencies,
+    'getSettings' | 'getCredential' | 'getHeaderSecrets'
+  >,
+  headerSecrets: Record<string, string> = {},
 ) {
   try {
-    await createProvider(profile, credential).testConnection();
+    const resolved = dependencies ?? (await providerProfileDependencies());
+    const settings = await resolved.getSettings();
+    const saved = settings.providerProfiles.some(
+      (item) => item.id === profile.id,
+    );
+    const savedCredential = saved
+      ? await resolved.getCredential(profile.id)
+      : null;
+    await createConfiguredProvider(
+      profile,
+      credential.trim() || savedCredential || '',
+      await resolveHeaderSecrets(
+        profile,
+        headerSecrets,
+        saved,
+        resolved.getHeaderSecrets,
+      ),
+    ).testConnection();
     return { ok: true as const };
   } catch (error) {
     const failure =
@@ -112,20 +265,72 @@ export async function testProviderProfile(
 export async function saveProviderProfile(
   profile: ProviderProfile,
   credential: string,
+  dependencies?: ProviderProfileDependencies,
+  headerSecrets: Record<string, string> = {},
 ): Promise<void> {
-  const [{ credentialStore }, { getSettings, setSettings }] = await Promise.all(
-    [import('../storage/credentials'), import('../storage/settings')],
+  const resolved = dependencies ?? (await providerProfileDependencies());
+  const settings = await resolved.getSettings();
+  const updating = settings.providerProfiles.some(
+    (item) => item.id === profile.id,
   );
-  const settings = await getSettings();
+  const replacementCredential = credential.trim();
+  const existingCredential = updating
+    ? await resolved.getCredential(profile.id)
+    : null;
+  createConfiguredProvider(
+    profile,
+    replacementCredential || existingCredential || '',
+  );
   const profiles = settings.providerProfiles.filter(
     (item) => item.id !== profile.id,
   );
   profiles.push(profile);
-  await credentialStore.set(profile.id, credential);
-  await setSettings({
+  if (replacementCredential) {
+    await resolved.setCredential(profile.id, replacementCredential);
+  }
+  await resolved.setHeaderSecrets?.(
+    profile.id,
+    headerSecrets,
+    (profile.headers ?? []).map((header) => header.name),
+  );
+  await resolved.setSettings({
     providerProfiles: profiles,
-    activeProviderProfileId: profile.id,
+    activeProviderProfileId: updating
+      ? settings.activeProviderProfileId
+      : profile.id,
   });
+}
+
+type ProviderProfileDependencies = {
+  getSettings(): Promise<ExtensionSettings>;
+  setSettings(
+    patch: Partial<Omit<ExtensionSettings, 'schemaVersion'>>,
+  ): Promise<unknown>;
+  getCredential(profileId: string): Promise<string | null>;
+  setCredential(profileId: string, credential: string): Promise<void>;
+  getHeaderSecrets?(profileId: string): Promise<Record<string, string>>;
+  setHeaderSecrets?(
+    profileId: string,
+    secrets: Record<string, string>,
+    keep: string[],
+  ): Promise<void>;
+};
+
+async function providerProfileDependencies(): Promise<ProviderProfileDependencies> {
+  const [{ credentialStore }, { getSettings, setSettings }] = await Promise.all(
+    [import('../storage/credentials'), import('../storage/settings')],
+  );
+  return {
+    getSettings,
+    setSettings,
+    getCredential: (profileId) => credentialStore.get(profileId),
+    setCredential: (profileId, credential) =>
+      credentialStore.set(profileId, credential),
+    getHeaderSecrets: (profileId) =>
+      credentialStore.getHeaderSecrets(profileId),
+    setHeaderSecrets: (profileId, secrets, keep) =>
+      credentialStore.setHeaderSecrets(profileId, secrets, keep),
+  };
 }
 
 type DeleteProviderDependencies = {

@@ -9,7 +9,20 @@ import {
   instructionForQuality,
   resolveTranslationQuality,
 } from '../translation/quality';
-import { PROVIDER_DEFINITIONS } from './config';
+import {
+  acceptsEndpointQuery,
+  DEFAULT_PROVIDER_ENDPOINTS,
+  isAiProvider,
+  isLocalProviderEndpoint,
+  isQwenCompatibleEndpoint,
+  PROVIDER_DEFINITIONS,
+  providerRequiresCredential,
+} from './config';
+import {
+  customHeaderValues,
+  joinEndpoint,
+  secretQueryParameter,
+} from './request-options';
 
 export type ProviderErrorCategory =
   | 'authentication'
@@ -18,7 +31,9 @@ export type ProviderErrorCategory =
   | 'invalid-request'
   | 'unavailable'
   | 'network'
-  | 'invalid-response';
+  | 'invalid-response'
+  | 'unsupported'
+  | 'language-pack';
 
 export class ProviderError extends Error {
   constructor(
@@ -43,18 +58,59 @@ const BASE_CAPABILITIES: ProviderCapabilities = {
   supportsStreaming: false,
 };
 
+const TRANSLATION_SCHEMA = {
+  type: 'object',
+  properties: {
+    translations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { id: { type: 'string' }, text: { type: 'string' } },
+        required: ['id', 'text'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['translations'],
+  additionalProperties: false,
+};
+
 export function createProvider(
   profile: ProviderProfile,
   credential: string,
   fetcher: typeof fetch = fetch,
+  headerSecrets: Record<string, string> = {},
 ): ConfiguredTranslationProvider {
-  if (!credential)
+  credential = credential.trim();
+  if (!credential && providerRequiresCredential(profile))
     throw new ProviderError(
       'authentication',
       'A provider credential is required.',
     );
   const endpoint = resolveEndpoint(profile);
-  validateEndpoint(endpoint);
+  validateEndpoint(endpoint, profile.provider);
+  const extraHeaders = customHeaderValues(profile.headers, headerSecrets);
+  if (
+    (profile.provider === 'anthropic' ||
+      profile.provider === 'gemini' ||
+      profile.provider === 'openai-responses') &&
+    !profile.model?.trim()
+  )
+    throw new ProviderError(
+      'invalid-request',
+      'Choose a translation model first.',
+    );
+  if (
+    profile.provider === 'gemini' &&
+    (profile.model ?? '')
+      .replace(/^models\//, '')
+      .split('/')
+      .some((segment) => !segment || segment === '.' || segment === '..')
+  )
+    throw new ProviderError(
+      'invalid-request',
+      'Enter a valid Gemini model id.',
+    );
   const definition = PROVIDER_DEFINITIONS.find(
     (item) => item.value === profile.provider,
   );
@@ -62,18 +118,17 @@ export function createProvider(
     ...BASE_CAPABILITIES,
     maxBatchSize: definition?.maxBatchSize ?? BASE_CAPABILITIES.maxBatchSize,
     // Conservative per-request budgets; a single paragraph is never truncated.
-    maxBatchCharacters:
-      profile.provider === 'openai-compatible' ? 12_000 : 24_000,
-    supportsContext: profile.provider === 'openai-compatible',
-    supportsStructuredOutput: profile.provider === 'openai-compatible',
+    maxBatchCharacters: isAiProvider(profile.provider) ? 12_000 : 24_000,
+    supportsContext: isAiProvider(profile.provider),
+    supportsStructuredOutput: isAiProvider(profile.provider),
     supportsNativeGlossary: profile.provider === 'deepl',
   };
   return {
-    capabilities,
+    capabilities: withTuning(capabilities, profile.tuning),
     translateBatch: (input) =>
-      translate(profile, credential, endpoint, input, fetcher),
+      translate(profile, credential, endpoint, input, fetcher, extraHeaders),
     async testConnection() {
-      await translate(
+      const translations = await translate(
         { ...profile, nativeGlossaryId: undefined },
         credential,
         endpoint,
@@ -84,7 +139,18 @@ export function createProvider(
           units: [{ id: 'connection-test', number: 1, text: 'Hello' }],
         },
         fetcher,
+        extraHeaders,
       );
+      if (
+        translations.length !== 1 ||
+        translations[0].id !== 'connection-test' ||
+        typeof translations[0].text !== 'string' ||
+        !translations[0].text.trim()
+      )
+        throw new ProviderError(
+          'invalid-response',
+          'The service did not return a valid test translation.',
+        );
     },
   };
 }
@@ -95,8 +161,15 @@ async function translate(
   endpoint: string,
   input: ProviderBatchInput,
   fetcher: typeof fetch,
+  extraHeaders: Record<string, string> = {},
 ): Promise<ProviderBatchResult> {
-  const request = buildRequest(profile, credential, endpoint, input);
+  const request = buildRequest(
+    profile,
+    credential,
+    endpoint,
+    input,
+    extraHeaders,
+  );
   let response: Response;
   try {
     response = await fetcher(request.url, request.init);
@@ -111,7 +184,8 @@ async function translate(
   let data: unknown;
   try {
     data = await response.json();
-  } catch {
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
     throw new ProviderError(
       'invalid-response',
       'The translation service returned invalid JSON.',
@@ -129,19 +203,38 @@ function buildRequest(
   credential: string,
   endpoint: string,
   input: ProviderBatchInput,
+  extraHeaders: Record<string, string> = {},
 ): { url: string; init: RequestInit } {
   const headers: Record<string, string> = {
+    ...extraHeaders,
     'content-type': 'application/json',
+  };
+  const bearer = (value: string) => {
+    if (!value) return;
+    if (profile.credentialHeader === 'api-key') headers['api-key'] = value;
+    else headers.authorization = `Bearer ${value}`;
   };
   let url: string;
   let body: unknown;
   switch (profile.provider) {
     case 'openai-compatible':
-      url = `${endpoint.replace(/\/$/, '')}/chat/completions`;
-      headers.authorization = `Bearer ${credential}`;
+      url = joinEndpoint(endpoint, 'chat/completions');
+      bearer(credential);
       body = {
         model: profile.model ?? 'gpt-4.1-mini',
-        response_format: { type: 'json_object' },
+        ...(['api.openai.com', 'api.mistral.ai', 'api.groq.com'].includes(
+          new URL(endpoint).hostname,
+        )
+          ? { response_format: { type: 'json_object' } }
+          : {}),
+        ...(isQwenCompatibleEndpoint(endpoint)
+          ? { enable_thinking: false }
+          : {}),
+        ...(['api.minimax.io', 'api.minimax.chat'].includes(
+          new URL(endpoint).hostname,
+        )
+          ? { reasoning_split: true }
+          : {}),
         messages: [
           {
             role: 'system',
@@ -149,6 +242,69 @@ function buildRequest(
           },
           { role: 'user', content: JSON.stringify(input.units) },
         ],
+      };
+      break;
+    case 'openai-responses': {
+      url = joinEndpoint(endpoint, 'responses');
+      bearer(credential);
+      const host = new URL(endpoint).hostname;
+      body = {
+        model: profile.model,
+        instructions: structuredInstruction(input),
+        input: JSON.stringify(input.units),
+        stream: false,
+        store: false,
+        text: {
+          format: ['api.openai.com', 'api.deepseek.com'].includes(host)
+            ? {
+                type: 'json_schema',
+                name: 'lingo_translation',
+                schema: TRANSLATION_SCHEMA,
+                ...(host === 'api.openai.com' ? { strict: true } : {}),
+              }
+            : { type: 'json_object' },
+        },
+      };
+      break;
+    }
+    case 'anthropic':
+      url = joinEndpoint(endpoint, 'messages');
+      if (credential) headers['x-api-key'] = credential;
+      headers['anthropic-version'] = '2023-06-01';
+      if (new URL(endpoint).hostname === 'api.anthropic.com')
+        headers['anthropic-dangerous-direct-browser-access'] = 'true';
+      body = {
+        model: profile.model,
+        max_tokens: 8192,
+        system: structuredInstruction(input),
+        messages: [{ role: 'user', content: JSON.stringify(input.units) }],
+        tools: [
+          {
+            name: 'translate',
+            description:
+              'Return the translated paragraphs with their original stable ids.',
+            input_schema: TRANSLATION_SCHEMA,
+          },
+        ],
+        tool_choice: { type: 'tool', name: 'translate' },
+      };
+      break;
+    case 'gemini':
+      url = `${endpoint}/models/${(profile.model ?? '')
+        .replace(/^models\//, '')
+        .split('/')
+        .map(encodeURIComponent)
+        .join('/')}:generateContent`;
+      if (credential) headers['x-goog-api-key'] = credential;
+      body = {
+        systemInstruction: { parts: [{ text: structuredInstruction(input) }] },
+        contents: [
+          { role: 'user', parts: [{ text: JSON.stringify(input.units) }] },
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseJsonSchema: TRANSLATION_SCHEMA,
+        },
       };
       break;
     case 'deepl':
@@ -197,6 +353,12 @@ function buildRequest(
       if (profile.region)
         headers['ocp-apim-subscription-region'] = profile.region;
       body = input.units.map((unit) => ({ text: unit.text }));
+      break;
+    case 'built-in':
+      throw new ProviderError(
+        'unsupported',
+        'On-device translation does not use network requests.',
+      );
   }
   return {
     url,
@@ -259,11 +421,51 @@ function parseResponse(
   ids: string[],
 ): ProviderBatchResult {
   try {
+    if (kind === 'openai-responses')
+      return parseResponsesTranslations(data, ids);
     if (kind === 'openai-compatible') {
       const content = (
         data as { choices: Array<{ message: { content: string } }> }
       ).choices[0].message.content;
       return parseStructuredTranslations(content);
+    }
+    if (kind === 'anthropic') {
+      const blocks = (
+        data as {
+          content: Array<{
+            type: string;
+            name?: string;
+            input?: unknown;
+            text?: string;
+          }>;
+        }
+      ).content;
+      const tool = blocks.find(
+        (block) => block.type === 'tool_use' && block.name === 'translate',
+      );
+      return parseStructuredTranslations(
+        tool
+          ? JSON.stringify(tool.input)
+          : blocks
+              .filter((block) => block.type === 'text')
+              .map((block) => block.text ?? '')
+              .join(''),
+      );
+    }
+    if (kind === 'gemini') {
+      const parts = (
+        data as {
+          candidates: Array<{
+            content: { parts: Array<{ text?: string; thought?: boolean }> };
+          }>;
+        }
+      ).candidates[0].content.parts;
+      return parseStructuredTranslations(
+        parts
+          .filter((part) => !part.thought)
+          .map((part) => part.text ?? '')
+          .join(''),
+      );
     }
     if (kind === 'deepl')
       return (
@@ -315,6 +517,51 @@ function structuredInstruction(input: ProviderBatchInput): string {
   return parts.join(' ');
 }
 
+function parseResponsesTranslations(
+  data: unknown,
+  ids: string[],
+): ProviderBatchResult {
+  if (!data || typeof data !== 'object' || Array.isArray(data))
+    throw new Error('Missing response.');
+  const response = data as Record<string, unknown>;
+  if (
+    (response.status !== undefined && response.status !== 'completed') ||
+    response.error != null ||
+    response.incomplete_details != null ||
+    !Array.isArray(response.output)
+  )
+    throw new Error('Response did not complete.');
+  const text: string[] = [];
+  for (const candidate of response.output) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const item = candidate as Record<string, unknown>;
+    if (item.type !== 'message' || item.role !== 'assistant') continue;
+    if (
+      (item.status !== undefined && item.status !== 'completed') ||
+      !Array.isArray(item.content)
+    )
+      throw new Error('Incomplete message.');
+    for (const candidatePart of item.content) {
+      if (!candidatePart || typeof candidatePart !== 'object') continue;
+      const part = candidatePart as Record<string, unknown>;
+      if (part.type === 'refusal') throw new Error('Translation refused.');
+      if (part.type === 'output_text') {
+        if (typeof part.text !== 'string') throw new Error('Invalid text.');
+        text.push(part.text);
+      }
+    }
+  }
+  const translations = parseStructuredTranslations(text.join(''));
+  const expected = new Set(ids);
+  if (
+    translations.length !== ids.length ||
+    new Set(translations.map((item) => item.id)).size !== ids.length ||
+    translations.some((item) => !expected.has(item.id))
+  )
+    throw new Error('Translation ids did not match.');
+  return translations;
+}
+
 function parseStructuredTranslations(content: string): ProviderBatchResult {
   try {
     const parsed = JSON.parse(repairJson(content)) as {
@@ -344,6 +591,7 @@ function parseStructuredTranslations(content: string): ProviderBatchResult {
 
 function repairJson(content: string): string {
   const withoutFence = content
+    .replace(/<think>[\s\S]*?<\/think>/g, '')
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/, '');
@@ -354,17 +602,54 @@ function repairJson(content: string): string {
     : withoutFence;
 }
 
-function resolveEndpoint(profile: ProviderProfile): string {
-  if (profile.endpoint) return profile.endpoint;
-  if (profile.provider === 'deepl') return 'https://api-free.deepl.com';
-  if (profile.provider === 'google-cloud')
-    return 'https://translation.googleapis.com';
-  if (profile.provider === 'azure-translator')
-    return 'https://api.cognitive.microsofttranslator.com';
-  return 'https://api.openai.com/v1';
+export function withTuning(
+  capabilities: ProviderCapabilities,
+  tuning: ProviderProfile['tuning'],
+): ProviderCapabilities {
+  if (!tuning) return capabilities;
+  return {
+    ...capabilities,
+    maxBatchSize: Math.min(
+      capabilities.maxBatchSize,
+      tuning.maxBatchSize ?? capabilities.maxBatchSize,
+    ),
+    ...(tuning.maxBatchCharacters
+      ? { maxBatchCharacters: tuning.maxBatchCharacters }
+      : {}),
+    requestPolicy: {
+      ...(tuning.concurrency ? { concurrency: tuning.concurrency } : {}),
+      ...(tuning.requestsPerMinute
+        ? { minIntervalMs: Math.ceil(60_000 / tuning.requestsPerMinute) }
+        : {}),
+      ...(tuning.timeoutSeconds
+        ? { timeoutMs: tuning.timeoutSeconds * 1000 }
+        : {}),
+    },
+  };
 }
 
-function validateEndpoint(endpoint: string): void {
+export function resolveEndpoint(profile: ProviderProfile): string {
+  const endpoint = (
+    profile.endpoint?.trim() || DEFAULT_PROVIDER_ENDPOINTS[profile.provider]
+  ).replace(/\/+$/, '');
+  if (profile.provider === 'anthropic' || profile.provider === 'gemini') {
+    try {
+      const url = new URL(endpoint);
+      if (url.pathname === '/' || url.pathname === '') {
+        url.pathname = profile.provider === 'gemini' ? '/v1beta' : '/v1';
+        return url.href;
+      }
+    } catch {
+      // Leave malformed URLs to the common endpoint validator.
+    }
+  }
+  return endpoint;
+}
+
+export function validateEndpoint(
+  endpoint: string,
+  provider?: ProviderProfile['provider'],
+): void {
   let url: URL;
   try {
     url = new URL(endpoint);
@@ -374,19 +659,40 @@ function validateEndpoint(endpoint: string): void {
       'A valid service endpoint URL is required.',
     );
   }
-  if (url.protocol === 'https:') return;
   if (
-    url.protocol === 'http:' &&
-    ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    url.username ||
+    url.password ||
+    url.hash ||
+    (url.search && !(provider && acceptsEndpointQuery(provider)))
   )
-    return;
+    throw new ProviderError(
+      'invalid-request',
+      'Use a service base URL without credentials, a query or a fragment.',
+    );
+  if (secretQueryParameter(endpoint))
+    throw new ProviderError(
+      'invalid-request',
+      'Put keys in the API key or header fields, not in the endpoint URL.',
+    );
+  if (
+    /\/(?:models(?:\/[^/]+)?|messages|chat\/completions|responses|translate|language\/translate\/v2)\/?$/.test(
+      url.pathname,
+    ) ||
+    /:generateContent$/.test(url.pathname)
+  )
+    throw new ProviderError(
+      'invalid-request',
+      'Use the service base URL instead of a complete API request URL.',
+    );
+  if (url.protocol === 'https:') return;
+  if (url.protocol === 'http:' && isLocalProviderEndpoint(endpoint)) return;
   throw new ProviderError(
     'invalid-request',
     'Custom endpoints must use HTTPS unless they are local.',
   );
 }
 
-function errorForStatus(
+export function errorForStatus(
   status: number,
   kind: ProviderProfile['provider'],
 ): ProviderError {

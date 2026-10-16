@@ -1,0 +1,103 @@
+.settings-embedded {
+  min-width: 0;
+}
+.settings-embedded .settings-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 0 12px;
+}
+.settings-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+}
+.settings-back:hover {
+  color: var(--muted);
+}
+.settings-embedded .section-nav {
+  flex-basis: 100%;
+  justify-content: space-between;
+  gap: 0;
+}
+.settings-embedded .section-nav > a,
+.settings-embedded .advanced-nav {
+  flex: 1;
+  min-width: 0;
+}
+.settings-embedded .section-nav :where(a, button) {
+  width: 100%;
+  padding: 10px 6px;
+  font-size: 12px;
+  gap: 5px;
+  min-height: 48px;
+  line-height: 1.35;
+  text-align: center;
+  white-space: normal;
+}
+.settings-embedded .section-nav svg {
+  flex-shrink: 0;
+}
+.settings-embedded .section-nav span {
+  overflow-wrap: anywhere;
+}
+.settings-embedded .options {
+  max-width: none;
+  padding: 18px 12px 32px;
+}
+.settings-embedded .settings-header {
+  margin-bottom: 16px;
+}
+.settings-embedded .settings-header h1 {
+  font-size: 16px;
+}
+.settings-embedded .model-setup {
+  gap: 16px;
+}
+.settings-embedded .model-setup-title {
+  gap: 12px;
+}
+.settings-embedded .model-setup-title h2 {
+  font-size: 16px;
+}
+.settings-embedded .model-provider-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.settings-embedded .model-provider-choice {
+  gap: 7px;
+}
+.settings-embedded .model-provider-choice > svg {
+  display: none;
+}
+.settings-embedded .model-setup-step {
+  padding: 16px 12px;
+}
+.settings-embedded .model-setup-footer {
+  padding: 14px 12px;
+}
+.settings-embedded .model-catalog-step h3,
+.settings-embedded .model-discovery-error-heading h4 {
+  scroll-margin-top: 136px;
+}
+.settings-embedded input {
+  scroll-margin-top: 160px;
+}
+.settings-embedded .model-setup-inline-error {
+  scroll-margin-top: 136px;
+}
+.settings-embedded .reading-appearance {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  margin-bottom: 24px;
+}
