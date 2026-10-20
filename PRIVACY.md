@@ -43,6 +43,13 @@ Custom request headers are sent only to the service they are configured for.
 Header values marked secret are stored with provider credentials in local
 extension storage and are excluded from settings, diagnostics, and cache keys.
 
+Video subtitle translation is off by default and starts only when the reader
+turns it on for a video, or chooses to always enable it on a site. Before that,
+Lingo does not read or download caption files. Once started, caption sentences
+from roughly the next 90 seconds of playback are sent to the active translation
+service, never the whole track at once. Caption files on another origin are
+fetched by the extension without cookies. Video and caption URLs are not stored.
+
 Vocabulary highlighting is off by default. When enabled, rare English words
 are identified on this device with a bundled word list. A word is sent to the
 active translation service only when the reader hovers it, or the surrounding

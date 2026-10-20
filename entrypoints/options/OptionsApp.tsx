@@ -28,6 +28,7 @@ import { SettingsIcon } from '@/lib/ui/settings-icon';
 import type { SettingsSection } from '@/lib/ui/settings-section';
 import ProviderSetup from './ProviderSetup';
 import ReadingAppearance from './ReadingAppearance';
+import SubtitleSettings from './SubtitleSettings';
 import VocabularySettings from './VocabularySettings';
 import './OptionsApp.css';
 
@@ -626,6 +627,9 @@ function OptionsApp({
             {t('tools.menuOpen')}
           </button>
         </section>
+        <SubtitleSettings
+          hidden={section !== 'reading' || initialLanguageSetup}
+        />
         <VocabularySettings
           hidden={section !== 'reading' || initialLanguageSetup}
           serviceName={

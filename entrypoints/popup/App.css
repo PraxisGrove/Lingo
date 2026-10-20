@@ -505,3 +505,68 @@
 :root[data-surface="sidepanel"] .data-flow {
   margin-top: auto;
 }
+
+.subtitle-control {
+  display: grid;
+  gap: 6px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.subtitle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.subtitle-row > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.subtitle-row strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.subtitle-row small {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.primary-pill,
+.secondary-pill {
+  flex-shrink: 0;
+  min-height: 28px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.primary-pill {
+  color: var(--brand-ink);
+  background: var(--brand-lime);
+  border: 1px solid var(--brand-lime);
+}
+.secondary-pill {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.subtitle-auto {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+.subtitle-control .subtitle-auto input {
+  position: absolute;
+  right: 0;
+  width: 30px;
+  height: 20px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}

@@ -44,6 +44,17 @@ vi.mock('@/lib/storage/settings', async () => {
   };
 });
 
+vi.mock('@/lib/subtitles/subtitle-store', async () => {
+  const model = await vi.importActual<
+    typeof import('../../lib/subtitles/subtitle-model')
+  >('../../lib/subtitles/subtitle-model');
+  return {
+    getSubtitlePreferences: async () => model.DEFAULT_SUBTITLES,
+    updateSubtitlePreferences: async () => model.DEFAULT_SUBTITLES,
+    watchSubtitlePreferences: () => () => undefined,
+  };
+});
+
 import App from './App';
 
 describe('popup App', () => {

@@ -31,6 +31,7 @@ import {
   setSettings,
   watchSettings,
 } from '@/lib/storage/settings';
+import { fetchCaptionFile } from '@/lib/subtitles/caption-fetch';
 import { createTranslationOrchestrator } from '@/lib/translation/orchestrator';
 import { resolveRequestQuality } from '@/lib/translation/request-quality';
 import { createRankService } from '@/lib/vocabulary/rank-service';
@@ -248,6 +249,9 @@ export default defineBackground(() => {
         return result;
       })();
     }
+
+    if (message.type === 'fetchCaptionFile')
+      return fetchCaptionFile(message.payload.url);
 
     if (message.type === 'classifyWords')
       return classifyWords(message.payload.words).then((ranks) => ({ ranks }));

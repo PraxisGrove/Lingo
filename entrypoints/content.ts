@@ -7,6 +7,11 @@ import { startAutomaticTranslation } from '@/lib/page-translation/automatic-sess
 import { createPageTranslation } from '@/lib/page-translation/page-translation';
 import { getPageRules } from '@/lib/rules/page-rules';
 import { getSettings, watchSettings } from '@/lib/storage/settings';
+import { createSubtitleLayer } from '@/lib/subtitles/subtitle-layer';
+import {
+  getSubtitlePreferences,
+  watchSubtitlePreferences,
+} from '@/lib/subtitles/subtitle-store';
 import { createFloatingPageControl } from '@/lib/ui/floating-page-control';
 import { createTextTools } from '@/lib/ui/text-tools';
 import { createVocabularyLayer } from '@/lib/vocabulary/vocabulary-layer';
@@ -76,6 +81,17 @@ export default defineContentScript({
         }));
       },
     });
+    const subtitleLayer = createSubtitleLayer({
+      document,
+      hostname: location.hostname,
+      client: createTranslationPortClient(),
+      t: translate,
+      async fetchCrossOrigin(url) {
+        const result = await sendMessage('fetchCaptionFile', { url });
+        if (!result.ok) throw new Error('Caption file unavailable.');
+        return result.text;
+      },
+    });
     let displayMode = pageTranslation.snapshot().displayMode;
     pageTranslation.subscribe(({ snapshot }) => {
       if (snapshot.displayMode === displayMode) return;
@@ -93,6 +109,12 @@ export default defineContentScript({
       if (!isExtensionMessage(message)) return undefined;
 
       switch (message.type) {
+        case 'getSubtitleState':
+          return Promise.resolve(subtitleLayer.snapshot());
+        case 'startSubtitles':
+          return Promise.resolve(subtitleLayer.start());
+        case 'stopSubtitles':
+          return Promise.resolve(subtitleLayer.stop());
         case 'runTextAction':
           textTools.execute(message.payload.action);
           return Promise.resolve({ ok: true });
@@ -100,6 +122,7 @@ export default defineContentScript({
           textTools.suspend();
           onNavigation();
           vocabularyLayer.refresh();
+          subtitleLayer.navigate();
           return Promise.resolve(pageTranslation.snapshot());
         case 'getPageTranslation':
           return Promise.resolve(pageTranslation.snapshot());
@@ -128,12 +151,17 @@ export default defineContentScript({
         textTools.update(settings);
         vocabularyLayer.updateSettings(settings);
         vocabularyLayer.updateVocabulary(await getVocabulary());
+        subtitleLayer.updateSettings(settings);
+        subtitleLayer.updatePreferences(await getSubtitlePreferences());
       })
       .catch((error) => {
         logger.error('Could not initialize content settings.', { error });
       });
     const unwatchVocabulary = watchVocabulary((vocabulary) =>
       vocabularyLayer.updateVocabulary(vocabulary),
+    );
+    const unwatchSubtitles = watchSubtitlePreferences((preferences) =>
+      subtitleLayer.updatePreferences(preferences),
     );
     const unwatchSettings = watchSettings((settings) => {
       pageTranslation.updateAppearance(settings.translationAppearance);
@@ -142,6 +170,7 @@ export default defineContentScript({
           floatingControl.update(settings);
           textTools.update(settings);
           vocabularyLayer.updateSettings(settings);
+          subtitleLayer.updateSettings(settings);
         })
         .catch((error) => {
           logger.error('Could not apply updated content settings.', { error });
@@ -161,6 +190,8 @@ export default defineContentScript({
         unwatchSettings();
         unwatchVocabulary();
         vocabularyLayer.dispose();
+        unwatchSubtitles();
+        subtitleLayer.dispose();
         floatingControl.dispose();
         textTools.dispose();
         client.disconnect();

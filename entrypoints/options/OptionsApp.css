@@ -540,3 +540,10 @@
   color: var(--muted);
   font-size: 11px;
 }
+
+.subtitle-sites > span {
+  flex: 1;
+}
+.subtitle-sites .vocabulary-wordbook {
+  margin: 6px 0 0;
+}

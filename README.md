@@ -10,11 +10,19 @@ translations; the background worker handles configured services, credentials,
 retries, and local caching.
 
 The current release focuses on browser reading and everyday text interactions.
-Document, subtitle, image, and additional platform support are later product
+Video subtitles are an early implementation undergoing acceptance testing.
+Document, image, and additional platform support remain later product
 explorations; they are not prerequisites for this extension stage.
 
 ## Current Capabilities
 
+- Bilingual video subtitles, off until the reader starts them from the Lingo
+  button on a video or the popup, with an optional per-site auto-start.
+  Sources, best first: YouTube's own caption requests, Bilibili AI subtitle
+  files, WebVTT/SRT files the page loads, HTML5 text tracks, and on-screen
+  captions for players that do not expose files (Netflix, Prime Video,
+  Disney+, Max). Caption fragments are merged into sentences and translated
+  just ahead of playback; seeking back reuses translations.
 - Optional vocabulary highlighting for English pages: rare words above the
   reader's chosen vocabulary size are underlined without changing the page,
   glossed on hover through the active service, and can be marked known or

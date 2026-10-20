@@ -71,6 +71,26 @@ vi.mock('@/lib/vocabulary/vocabulary-store', async () => {
   };
 });
 
+vi.mock('@/lib/subtitles/subtitle-store', async () => {
+  const model = await vi.importActual<
+    typeof import('../../lib/subtitles/subtitle-model')
+  >('../../lib/subtitles/subtitle-model');
+  let preferences = model.DEFAULT_SUBTITLES;
+  return {
+    getSubtitlePreferences: async () => preferences,
+    updateSubtitlePreferences: async (
+      update: (current: typeof preferences) => Partial<typeof preferences>,
+    ) => {
+      preferences = model.resolveSubtitles({
+        ...preferences,
+        ...update(preferences),
+      });
+      return preferences;
+    },
+    watchSubtitlePreferences: () => () => undefined,
+  };
+});
+
 // Provider connection and model-selection interactions are covered separately
 // in ProviderSetup.test.tsx. This suite exercises the surrounding settings shell.
 vi.mock('./ProviderSetup', async () => {

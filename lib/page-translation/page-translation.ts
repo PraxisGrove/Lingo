@@ -143,6 +143,16 @@ export const PROTECTED_SELECTOR = [
   '[id*="payment" i]',
   '[class*="advert" i]',
   '[class~="ad" i]',
+  // Player caption layers are handled by subtitle translation, not as text.
+  'video',
+  'track',
+  '.ytp-caption-window-container',
+  '.bpx-player-subtitle-wrap',
+  '.player-timedtext',
+  '.atvwebplayersdk-captions-overlay',
+  '.dss-subtitle-renderer-wrapper',
+  '.vp-captions',
+  '.vjs-text-track-display',
 ].join(',');
 export const INTERFACE_SELECTOR =
   '[data-lingo-content="interface"], nav, header, footer, [role="navigation"]';

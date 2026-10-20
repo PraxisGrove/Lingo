@@ -15,6 +15,7 @@ import {
   PROVIDER_TUNING_LIMITS,
   type ProviderProfile,
 } from '@/lib/storage/settings-model';
+import type { SubtitleSnapshot } from '@/lib/subtitles/controller';
 import type { TextAction } from '@/lib/ui/text-tools';
 import type { RankedWord } from '@/lib/vocabulary/word-ranks';
 
@@ -102,6 +103,22 @@ export type ExtensionMessages = {
     request: Record<string, never>;
     response: DiagnosticReport;
   };
+  getSubtitleState: {
+    request: Record<string, never>;
+    response: SubtitleSnapshot;
+  };
+  startSubtitles: {
+    request: Record<string, never>;
+    response: SubtitleSnapshot;
+  };
+  stopSubtitles: {
+    request: Record<string, never>;
+    response: SubtitleSnapshot;
+  };
+  fetchCaptionFile: {
+    request: { url: string };
+    response: { ok: true; text: string } | { ok: false };
+  };
   classifyWords: {
     request: { words: string[] };
     response: { ranks: Record<string, RankedWord | null> };
@@ -160,6 +177,9 @@ export function isExtensionMessage(
         )
       );
     case 'openSettings':
+    case 'getSubtitleState':
+    case 'startSubtitles':
+    case 'stopSubtitles':
     case 'getPageTranslation':
     case 'pageNavigation':
     case 'stopPageTranslation':
@@ -211,6 +231,13 @@ export function isExtensionMessage(
         typeof message.payload.credential === 'string' &&
         (message.payload.headerSecrets === undefined ||
           isHeaderSecrets(message.payload.headerSecrets))
+      );
+    case 'fetchCaptionFile':
+      return (
+        isRecordWithKeys(message.payload, ['url']) &&
+        typeof message.payload.url === 'string' &&
+        message.payload.url.length <= 4096 &&
+        /^https?:\/\//.test(message.payload.url)
       );
     case 'classifyWords':
       return (

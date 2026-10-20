@@ -24,6 +24,7 @@ import { resolvePopupNotice } from '@/lib/ui/popup-state';
 import { ProviderIcon } from '@/lib/ui/provider-icon';
 import { detectProviderPreset } from '@/lib/ui/provider-presets';
 import type { SettingsSection } from '@/lib/ui/settings-section';
+import SubtitleControl from './SubtitleControl';
 import './App.css';
 
 const logger = createLogger('popup');
@@ -402,6 +403,13 @@ function App({
                   </button>
                 )}
               </section>
+            )}
+
+            {activeProvider && settings.enabled && (
+              <SubtitleControl
+                hostname={hostname}
+                serviceName={activeProvider.name}
+              />
             )}
 
             <section

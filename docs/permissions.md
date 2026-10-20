@@ -21,6 +21,15 @@ icon. It contains translation controls and follows the active webpage; it does
 not inject a floating sidebar into the page. This permission only enables the
 Chromium panel UI. Firefox uses its native `sidebar_action` without this permission.
 
+## Video subtitles (`<all_urls>`)
+
+Subtitle translation uses the existing all-sites access. After the reader starts
+it on a video, the content script reads the caption file the player loaded, the
+video's text tracks, or the captions shown on screen. Caption files on another
+origin are fetched by the background worker without cookies; only caption-like
+URLs (WebVTT, SRT, YouTube timedtext, Bilibili subtitle files) are accepted, up
+to 2 MB. No additional permission is requested. See ADR-0015.
+
 ## `offscreen` (Chromium)
 
 When the reader chooses browser on-device translation, the background worker
