@@ -17,6 +17,13 @@ updates:
         update-types:
           - "minor"
           - "patch"
+        exclude-patterns:
+          - "@biomejs/biome"
+      # Biome minor releases change formatting and the configuration schema, so
+      # they land as a deliberate migration instead of inside the dev group.
+      biome:
+        patterns:
+          - "@biomejs/biome"
     ignore:
       # Playwright browser builds and the test runner are released together.
       # Bump them with a coordinated change to the CI cache key instead.

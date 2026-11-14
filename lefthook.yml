@@ -25,11 +25,13 @@ pre-commit:
     08-build-firefox:
       run: pnpm build:firefox
       interactive: true
-    09-extension-test:
-      run: pnpm test:extension
-      interactive: true
-    10-whitespace:
+    09-whitespace:
       run: git diff --check
+
+# The installed-extension suite drives a real Chromium build and is gated by the
+# `Extension (macOS)` CI job. It stays out of commit-time hooks so a slow browser
+# run cannot block a commit; run `pnpm test:extension` (or `pnpm verify:commit`)
+# when touching browser behaviour, permissions, or layout.
 
 commit-msg:
   commands:
