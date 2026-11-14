@@ -8,14 +8,21 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   package:
     name: Package Extension
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -23,7 +30,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install dependencies
@@ -36,6 +43,38 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package.json version $expected." >&2
             exit 1
           fi
+
+      - name: Require the tag to be on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Tag $GITHUB_REF_NAME does not point to a commit on main." >&2
+            exit 1
+          fi
+
+      - name: Require successful CI for the tagged commit
+        uses: actions/github-script@v9
+        env:
+          TAGGED_SHA: ${{ github.sha }}
+        with:
+          script: |
+            const sha = process.env.TAGGED_SHA;
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci.yml',
+              branch: 'main',
+              event: 'push',
+              status: 'completed',
+              head_sha: sha,
+              per_page: 20,
+            });
+            const validated = runs.some(
+              (run) => run.head_sha === sha && run.conclusion === 'success',
+            );
+            if (!validated) {
+              core.setFailed(`CI has not passed for ${sha}; release tags must point to a validated main commit.`);
+            }
 
       - name: Validate
         run: |

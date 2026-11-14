@@ -9,10 +9,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -24,7 +29,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install dependencies
@@ -36,12 +41,6 @@ jobs:
       - name: Test
         run: pnpm -s test
 
-      - name: Install browser test runtimes
-        run: pnpm exec playwright install --with-deps chromium firefox
-
-      - name: Test in browsers
-        run: pnpm -s test:browser
-
       - name: Check
         run: pnpm -s check
 
@@ -50,6 +49,55 @@ jobs:
 
       - name: Build Firefox
         run: pnpm -s build:firefox
+
+      - name: Restore browser test runtimes
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install browser test runtimes
+        run: pnpm exec playwright install --with-deps chromium firefox
+
+      - name: Test in browsers
+        run: pnpm -s test:browser
+
+  # The installed-extension suite asserts layout fit at fixed viewport sizes, so
+  # it runs on the platform whose font metrics the assertions encode. Firefox is
+  # still built on Ubuntu, where packaging is validated.
+  extension:
+    name: Extension (macOS)
+    runs-on: macos-15
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm -s build
+
+      - name: Restore browser test runtimes
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Chromium
+        run: pnpm exec playwright install chromium
 
       - name: Test installed Chromium extension
         run: pnpm -s test:extension

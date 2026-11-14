@@ -13,7 +13,8 @@ The project must establish a signed CLA process before accepting external code.
 
 ## Development
 
-Use pnpm for package operations. Before opening a pull request, run:
+Use the Node version pinned in `.nvmrc` and pnpm for package operations.
+Before opening a pull request, run:
 
 ```bash
 pnpm browser:install # once per Playwright version
@@ -23,7 +24,14 @@ pnpm test:browser
 pnpm check
 pnpm build
 pnpm build:firefox
+pnpm test:extension
 ```
+
+`pnpm test:extension` loads the built extension into a real Chromium. It runs on
+macOS in CI because its sidebar layout assertions encode that platform's font
+metrics; the browser suite still runs on Linux. Extension actions use
+`EXTENSION_ACTION_TIMEOUT` from `tests/extension/timeouts.ts` so a cold service
+worker is not mistaken for a broken panel.
 
 Add tests next to the code they cover. Test behavior through public module
 interfaces and avoid direct `console.*` calls; use the scoped logger.
