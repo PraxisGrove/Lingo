@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import pageTranslationCss from '../../entrypoints/page-translation.css?raw';
 import { createPageTranslation } from '../../lib/page-translation/page-translation';
 import {
@@ -9,6 +9,7 @@ import {
 import { createRankService } from '../../lib/vocabulary/rank-service';
 import { sentenceAround } from '../../lib/vocabulary/word-card';
 import enRanks from '../../public/vocabulary/en-ranks.txt?raw';
+import { waitFor } from '../wait';
 
 const ARTICLE = `<main>
   <p id="story">The sailors were tired after the long voyage. When the captain
@@ -57,7 +58,7 @@ describe('vocabulary highlighting', () => {
     document.body.innerHTML = ARTICLE;
     const before = document.body.innerHTML;
     start();
-    await vi.waitFor(() => expect(highlighted()).toContain('mutiny'));
+    await waitFor(() => expect(highlighted()).toContain('mutiny'));
     expect(highlighted()).toContain('nephews');
     expect(highlighted()).not.toContain('the');
     expect(highlighted()).not.toContain('library');
@@ -80,7 +81,7 @@ describe('vocabulary highlighting', () => {
     document.documentElement.lang = 'en';
     document.body.innerHTML = ARTICLE;
     const highlighter = start();
-    await vi.waitFor(() => expect(highlighted()).toContain('mutiny'));
+    await waitFor(() => expect(highlighted()).toContain('mutiny'));
     const story = document.getElementById('story')?.firstChild as Text;
     const index = story.data.indexOf('mutiny');
     const range = document.createRange();
@@ -119,7 +120,7 @@ describe('vocabulary highlighting', () => {
     await session.start({ targetLanguage: 'zh-CN', displayMode: 'bilingual' });
     const requestCount = requests.length;
     const highlighter = start();
-    await vi.waitFor(() => expect(highlighted()).toContain('mutiny'));
+    await waitFor(() => expect(highlighted()).toContain('mutiny'));
     // Only the original paragraph's word is marked, not the translation's.
     expect(highlighted().filter((word) => word === 'mutiny')).toHaveLength(1);
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -136,10 +137,10 @@ describe('vocabulary highlighting', () => {
     document.body.innerHTML = ARTICLE;
     const known = new Set<string>();
     const highlighter = start(5000, known);
-    await vi.waitFor(() => expect(highlighted()).toContain('nephews'));
+    await waitFor(() => expect(highlighted()).toContain('nephews'));
     known.add('nephew');
     highlighter.refresh();
-    await vi.waitFor(() => expect(highlighted()).toContain('mutiny'));
+    await waitFor(() => expect(highlighted()).toContain('mutiny'));
     expect(highlighted()).not.toContain('nephews');
   });
 });

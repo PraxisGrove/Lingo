@@ -4,8 +4,8 @@ import { type BrowserContext, chromium, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resources } from '../../lib/i18n/resources';
 import { DEFAULT_SETTINGS } from '../../lib/storage/settings-model';
+import { waitFor } from '../wait';
 import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
-import { waitFor } from './wait';
 
 declare const chrome: {
   storage: {

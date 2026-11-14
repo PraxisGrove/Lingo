@@ -3,8 +3,8 @@ import { resolve } from 'node:path';
 import { type BrowserContext, chromium, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../lib/storage/settings-model';
+import { waitFor } from '../wait';
 import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
-import { waitFor } from './wait';
 
 declare const chrome: {
   storage: {

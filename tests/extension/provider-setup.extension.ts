@@ -7,8 +7,8 @@ import {
   DEFAULT_SETTINGS,
   type ExtensionSettings,
 } from '../../lib/storage/settings-model';
+import { waitFor } from '../wait';
 import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
-import { waitFor } from './wait';
 
 declare const chrome: {
   storage: {

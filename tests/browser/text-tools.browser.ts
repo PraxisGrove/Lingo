@@ -5,6 +5,7 @@ import { createPageTranslation } from '../../lib/page-translation/page-translati
 import { DEFAULT_SETTINGS } from '../../lib/storage/settings-model';
 import type { TranslationUnit } from '../../lib/translation/types';
 import { createTextTools } from '../../lib/ui/text-tools';
+import { waitFor } from '../wait';
 
 let cleanup: (() => void) | undefined;
 afterEach(() => {
@@ -24,7 +25,7 @@ describe('text interactions in real browsers', () => {
     await session.start({ targetLanguage: 'zh-CN', displayMode: 'bilingual' });
     (document.querySelector('p') as HTMLElement).innerHTML =
       '<span translate="no">Hello</span>';
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(document.querySelector('[data-lingo-translation]')).toBeNull(),
     );
     expect(translate).toHaveBeenCalledTimes(1);
@@ -116,7 +117,7 @@ describe('text interactions in real browsers', () => {
       .getSelection()
       ?.setBaseAndExtent(text, 0, text, text.textContent?.length ?? 0);
     tools.execute('selection');
-    await vi.waitFor(() => expect(requests).toEqual(['Shadow selection.']));
+    await waitFor(() => expect(requests).toEqual(['Shadow selection.']));
     [
       ...(document
         .querySelector('[data-lingo-owned="text-tools"]')
@@ -200,7 +201,7 @@ describe('text interactions in real browsers', () => {
     const panel = document.querySelector(
       '[data-lingo-owned="text-tools"]',
     )?.shadowRoot;
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(panel?.querySelector('[role="status"]')?.textContent).toBe(
         resources.en.translation['tools.protected'],
       ),
@@ -243,13 +244,13 @@ describe('text interactions in real browsers', () => {
     [...panel.querySelectorAll('button')]
       .find((button) => button.textContent === 'Translate')
       ?.click();
-    await vi.waitFor(() => expect(release).toBeDefined());
+    await waitFor(() => expect(release).toBeDefined());
     const cancellations = cancel.mock.calls.length;
     tools.update({ ...settings, theme: 'dark', uiLocale: 'ja' });
     expect(target.value).toBe('ja');
     expect(cancel.mock.calls.length).toBe(cancellations);
     release?.([{ id: 'text-tool', number: 1, text: 'Draft translated.' }]);
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(panel.querySelector('.output')?.textContent).toBe(
         'Draft translated.',
       ),
@@ -280,12 +281,12 @@ describe('text interactions in real browsers', () => {
     );
     const assigned = host.querySelector('[slot]') as HTMLElement;
     assigned.setAttribute('slot', 'unmatched');
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(assigned.querySelector('[data-lingo-translation]')).toBeNull(),
     );
     expect(requests).not.toContain('Hidden light sentinel.');
     assigned.setAttribute('slot', 'reading');
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(assigned.querySelector('[data-lingo-translation]')).not.toBeNull(),
     );
   });
@@ -310,7 +311,7 @@ describe('text interactions in real browsers', () => {
       translation,
     );
     original.setAttribute('translate', 'no');
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(document.querySelector('[data-lingo-translation]')).toBeNull(),
     );
     expect(translate).toHaveBeenCalledTimes(1);
@@ -361,12 +362,12 @@ describe('text interactions in real browsers', () => {
         new PointerEvent('pointermove', { bubbles: true, composed: true }),
       );
     tools.execute('paragraph');
-    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    await waitFor(() => expect(requests).toHaveLength(1));
     expect(requests[0]).not.toContain('local-code-sentinel');
     const panel = document.querySelector(
       '[data-lingo-owned="text-tools"]',
     )?.shadowRoot;
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(panel?.querySelector('.output code')?.textContent).toBe(
         'local-code-sentinel',
       ),
@@ -380,7 +381,7 @@ describe('text interactions in real browsers', () => {
         new PointerEvent('pointermove', { bubbles: true, composed: true }),
       );
     tools.execute('paragraph');
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(panel?.querySelector('[role="status"]')?.textContent).toBe(
         resources.en.translation['tools.protected'],
       ),
@@ -423,7 +424,7 @@ describe('text interactions in real browsers', () => {
     const buttons = () => [...shadow.querySelectorAll('button')];
     field.focus();
     tools.execute('input');
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(shadow.querySelector('.output')?.textContent).toBe('你好'),
     );
     expect(field.value).toBe('Hello');
@@ -437,10 +438,10 @@ describe('text interactions in real browsers', () => {
     expect(field.value).toBe('Hello');
     field.focus();
     tools.execute('input');
-    await vi.waitFor(() => expect(release).toBeDefined());
+    await waitFor(() => expect(release).toBeDefined());
     field.value = 'Edited while waiting';
     release?.();
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(shadow.querySelector('.output')?.textContent).toBe('你好'),
     );
     buttons()
@@ -479,7 +480,7 @@ describe('text interactions in real browsers', () => {
     document.getSelection()?.removeAllRanges();
     document.getSelection()?.addRange(range);
     tools.execute('selection');
-    await vi.waitFor(() => expect(requests).toEqual(['Hello reader']));
+    await waitFor(() => expect(requests).toEqual(['Hello reader']));
     range.selectNodeContents(
       document.querySelector('[translate="no"]') as Element,
     );
@@ -536,7 +537,7 @@ describe('text interactions in real browsers', () => {
     const paragraph = root.querySelector('p');
     if (!paragraph) throw new Error('Missing shadow paragraph');
     paragraph.textContent = 'Changed shadow paragraph.';
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(root.querySelector('[data-lingo-translation]')?.textContent).toBe(
         'Translated: Changed shadow paragraph.',
       ),
@@ -545,21 +546,21 @@ describe('text interactions in real browsers', () => {
     const addedRoot = additional.attachShadow({ mode: 'open' });
     addedRoot.innerHTML = '<p>Added component.</p>';
     root.append(additional);
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(
         addedRoot.querySelector('[data-lingo-translation]')?.textContent,
       ).toBe('Translated: Added component.'),
     );
     const sentCount = requests.length;
     host.setAttribute('translate', 'no');
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(root.querySelector('[data-lingo-translation]')).toBeNull();
       expect(nested.querySelector('[data-lingo-translation]')).toBeNull();
       expect(addedRoot.querySelector('[data-lingo-translation]')).toBeNull();
     });
     expect(requests.length).toBe(sentCount);
     host.removeAttribute('translate');
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(nested.querySelector('[data-lingo-translation]')).not.toBeNull(),
     );
     await session.stop();

@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { page } from 'vitest/browser';
 import pageTranslationCss from '../../entrypoints/page-translation.css?raw';
 import contentTypesFixture from '../../lib/page-translation/fixtures/content-types.html?raw';
 import { createPageTranslation } from '../../lib/page-translation/page-translation';
 import { BUILT_IN_RULES, resolveRules } from '../../lib/rules/rule-resolver';
 import { SITE_LAYOUTS, SITE_PARAGRAPH } from '../fixtures/site-layouts';
+import { waitFor } from '../wait';
 import fixtureCss from './page-translation-fixture.css?raw';
 
 let stopTranslation: (() => Promise<void>) | undefined;
@@ -61,7 +62,7 @@ describe('page translation browser fixture', () => {
       throw new Error('Missing text nodes.');
     paragraph.firstChild.textContent = 'New paragraph.';
     cell.firstChild.textContent = 'New cell.';
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(requiredElement('p[data-lingo-translation]').textContent).toBe(
         'Translated: New paragraph.',
       );

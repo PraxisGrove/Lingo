@@ -9,6 +9,7 @@ import {
   type PageTranslation,
 } from '../../lib/page-translation/page-translation';
 import type { TranslationUnit } from '../../lib/translation/types';
+import { waitFor } from '../wait';
 
 let session: PageTranslation | undefined;
 
@@ -131,7 +132,7 @@ describe('translated reading appearance', () => {
       'rgb(33, 40, 35)',
     );
     required('article').classList.add('dark');
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(
         getComputedStyle(required('p[data-lingo-translation]')).color,
       ).toBe('rgb(229, 231, 226)');

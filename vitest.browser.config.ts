@@ -10,6 +10,9 @@ export default defineConfig({
   },
   test: {
     include: ['tests/browser/**/*.browser.ts'],
+    // Real browsers on a shared runner need more than the 5s default before a
+    // media element reports progress; waits are bounded in ../wait.ts.
+    testTimeout: 30_000,
     browser: {
       enabled: true,
       headless: true,

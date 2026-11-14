@@ -4,6 +4,7 @@ import { createSubtitleController } from '../../lib/subtitles/controller';
 import { GENERIC_PROFILE } from '../../lib/subtitles/site-profiles';
 import sampleVideo from '../fixtures/sample-10s.webm?url';
 import sampleCaptions from '../fixtures/sample-en.vtt?url';
+import { waitFor } from '../wait';
 
 const VTT = `WEBVTT
 
@@ -95,14 +96,14 @@ describe('video subtitles', () => {
     });
     const snapshot = controller.start();
     expect(snapshot).toMatchObject({ active: true, hasVideo: true });
-    await vi.waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
     // Fragments merge into one sentence; nothing past the window is sent early.
     expect(requests[0]).toEqual([
       'The ship left the harbour before sunrise.',
       'Nobody knew where it was going.',
     ]);
     video.currentTime = 1;
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(overlayText()).toMatchObject({
         original: 'The ship left the harbour before sunrise.',
         translation: '译:The ship left the harbour before sunrise.',
@@ -140,14 +141,14 @@ describe('video subtitles', () => {
     });
     controller.start();
     video.currentTime = 6;
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(overlayText()).toMatchObject({
         translation: '译:Nobody knew where it was going.',
         originalHidden: true,
       }),
     );
     video.currentTime = 4.5;
-    await vi.waitFor(() => expect(overlayText().translation).toBe(''));
+    await waitFor(() => expect(overlayText().translation).toBe(''));
   });
 
   it('removes its overlay and restores page state when stopped', async () => {
@@ -187,7 +188,7 @@ describe('video subtitles', () => {
     });
     cleanup.push(() => controller.stop());
     controller.start();
-    await vi.waitFor(
+    await waitFor(
       () => expect(controller.snapshot().status).toBe('waiting-captions'),
       { timeout: 4000 },
     );
@@ -214,18 +215,18 @@ describe('video subtitles', () => {
     });
     cleanup.push(() => controller.stop());
     controller.start();
-    await vi.waitFor(() => expect(controller.snapshot().source).toBe('live'), {
+    await waitFor(() => expect(controller.snapshot().source).toBe('live'), {
       timeout: 4000,
     });
     native.textContent = 'Where are we going?';
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(overlayText().translation).toBe('译:Where are we going?'),
     );
     // A repeated line is served from memory instead of a new request.
     native.textContent = '';
-    await vi.waitFor(() => expect(overlayText().original).toBe(''));
+    await waitFor(() => expect(overlayText().original).toBe(''));
     native.textContent = 'Where are we going?';
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(overlayText().translation).toBe('译:Where are we going?'),
     );
     expect(requests).toEqual([['Where are we going?']]);
@@ -252,12 +253,12 @@ describe('video subtitles', () => {
     controller.start();
     // The page's player requests the file after Lingo started watching.
     await fetch(vttUrl);
-    await vi.waitFor(() => expect(controller.snapshot().source).toBe('file'), {
+    await waitFor(() => expect(controller.snapshot().source).toBe('file'), {
       timeout: 4000,
     });
     expect(fetched).toContain(vttUrl);
     video.currentTime = 6;
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(overlayText().translation).toBe(
         '译:Nobody knew where it was going.',
       ),
