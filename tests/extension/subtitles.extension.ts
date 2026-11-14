@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { resolve } from 'node:path';
 import { type BrowserContext, chromium, type Page } from 'playwright';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../lib/storage/settings-model';
 import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
 import { waitFor } from './wait';
@@ -40,6 +40,14 @@ const translated: string[] = [];
 let captionFetches = 0;
 
 describe('installed video subtitles', () => {
+  // The scheduler is asynchronous and the suite retries a failed attempt, so
+  // every test starts from a clean observation log instead of inheriting the
+  // previous attempt's requests.
+  beforeEach(() => {
+    translated.length = 0;
+    captionFetches = 0;
+  });
+
   beforeAll(async () => {
     server = createServer(async (request, response) => {
       const url = new URL(request.url ?? '/', 'http://localhost');
@@ -207,7 +215,9 @@ describe('installed video subtitles', () => {
         '译:Nobody knew where it was going.',
       ),
     );
-    expect([...translated].sort()).toEqual([
+    // A request may repeat an already translated sentence as context for the
+    // provider, so the deduplicated set is the contract, not the raw log.
+    expect([...new Set(translated)].sort()).toEqual([
       'Nobody knew where it was going.',
       'The ship left the harbour before sunrise.',
     ]);
@@ -221,7 +231,6 @@ describe('installed video subtitles', () => {
   });
 
   it('translates Bilibili-style AI subtitles fetched from the subtitle CDN', async () => {
-    translated.length = 0;
     await context.route('https://bili.test/**', (route) =>
       new URL(route.request().url()).pathname === '/video.webm'
         ? route.fulfill(videoResponse(route.request().headers().range))

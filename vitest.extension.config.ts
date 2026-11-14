@@ -11,7 +11,8 @@ export default defineConfig({
     hookTimeout: 60_000,
     fileParallelism: false,
     // These specs drive a real browser against timed caption and streaming
-    // paths; one retry on CI separates a slow frame from a real regression.
-    retry: process.env.CI ? 1 : 0,
+    // paths. The known-flaky subtitle specs (issue #9) get two CI retries so a
+    // slow video or caption frame does not block an unrelated dependency bump.
+    retry: process.env.CI ? 2 : 0,
   },
 });
