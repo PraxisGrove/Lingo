@@ -36,6 +36,12 @@ worker is not mistaken for a broken panel.
 Add tests next to the code they cover. Test behavior through public module
 interfaces and avoid direct `console.*` calls; use the scoped logger.
 
+The type-checking contract lives in `tsconfig.json`, which extends the file WXT
+generates. WXT 0.21 turns on `noUncheckedIndexedAccess` in that generated file;
+the root configuration pins it back off because adopting it is a separate change
+across roughly thirty source files, not a dependency bump. Remove the override
+together with that work.
+
 ## Landing On Main
 
 Work directly on `main`; pull requests are not required. `main` does require the
