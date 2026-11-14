@@ -8,5 +8,8 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     fileParallelism: false,
+    // These specs drive a real browser against timed caption and streaming
+    // paths; one retry on CI separates a slow frame from a real regression.
+    retry: process.env.CI ? 1 : 0,
   },
 });

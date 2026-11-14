@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { type BrowserContext, chromium, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../lib/storage/settings-model';
+import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
 
 declare const chrome: {
   storage: {
@@ -68,7 +69,7 @@ describe('installed vocabulary highlighting', () => {
         `--load-extension=${extensionPath}`,
       ],
     });
-    context.setDefaultTimeout(10_000);
+    context.setDefaultTimeout(EXTENSION_ACTION_TIMEOUT);
     const worker =
       context.serviceWorkers()[0] ??
       (await context.waitForEvent('serviceworker'));

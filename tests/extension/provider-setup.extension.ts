@@ -15,6 +15,7 @@ import {
   DEFAULT_SETTINGS,
   type ExtensionSettings,
 } from '../../lib/storage/settings-model';
+import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
 
 declare const chrome: {
   storage: {
@@ -264,7 +265,7 @@ describe('installed extension provider setup', () => {
         `--load-extension=${extensionPath}`,
       ],
     });
-    context.setDefaultTimeout(10_000);
+    context.setDefaultTimeout(EXTENSION_ACTION_TIMEOUT);
     const worker =
       context.serviceWorkers()[0] ??
       (await context.waitForEvent('serviceworker'));

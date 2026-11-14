@@ -16,6 +16,7 @@ import {
   DEFAULT_SETTINGS,
   type ExtensionSettings,
 } from '../../lib/storage/settings-model';
+import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
 
 declare const chrome: {
   storage: {
@@ -158,9 +159,12 @@ describe('installed native reading sidebar', () => {
       args: [
         `--disable-extensions-except=${extensionPath}`,
         `--load-extension=${extensionPath}`,
+        // Classic scrollbars change the usable width of the document and make
+        // horizontal-fit assertions depend on the host scrollbar style.
+        '--hide-scrollbars',
       ],
     });
-    context.setDefaultTimeout(10_000);
+    context.setDefaultTimeout(EXTENSION_ACTION_TIMEOUT);
     const worker =
       context.serviceWorkers()[0] ??
       (await context.waitForEvent('serviceworker'));
@@ -499,7 +503,9 @@ describe('installed native reading sidebar', () => {
             .bottom ?? 0,
       }));
       expect(position.top).toBeGreaterThanOrEqual(position.toolbarBottom);
-      expect(position.bottom).toBeLessThanOrEqual(position.viewport);
+      // Sub-pixel layout rounding differs between font rasterizers; one pixel of
+      // slack keeps the visibility contract without encoding host metrics.
+      expect(position.bottom).toBeLessThanOrEqual(position.viewport + 1);
     });
     expect(await panel.locator('.model-selected code').textContent()).toBe(
       'manual-model',
@@ -682,9 +688,12 @@ async function backToPage(panel: Page, locale: SupportedUiLocale = 'en') {
 }
 
 async function assertFits(panel: Page) {
+  // Sidebar layouts must never scroll horizontally. `clientWidth` excludes the
+  // scrollbar gutter, and the one-pixel slack absorbs sub-pixel rounding so the
+  // contract does not depend on the runner's font metrics.
   const size = await panel.evaluate(() => ({
     width: document.documentElement.scrollWidth,
-    viewport: innerWidth,
+    viewport: document.documentElement.clientWidth,
   }));
-  expect(size.width).toBeLessThanOrEqual(size.viewport);
+  expect(size.width).toBeLessThanOrEqual(size.viewport + 1);
 }
