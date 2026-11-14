@@ -42,7 +42,7 @@
     "react-i18next": "^17.1.13"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.2",
+    "@biomejs/biome": "^2.6.7",
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@resvg/resvg-js": "2.6.2",
