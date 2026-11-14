@@ -50,7 +50,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitest/browser-playwright": "4.1.10",
     "@wxt-dev/module-react": "^1.1.5",
-    "happy-dom": "^20.10.6",
+    "happy-dom": "^21.0.4",
     "lefthook": "^2.1.10",
     "playwright": "^1.61.1",
     "typescript": "^5.9.3",
