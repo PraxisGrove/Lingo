@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { resolve } from 'node:path';
 import { type BrowserContext, chromium, type Page } from 'playwright';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../lib/storage/settings-model';
 import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
+import { waitFor } from './wait';
 
 declare const chrome: {
   storage: { local: { set(value: Record<string, unknown>): Promise<void> } };
@@ -160,7 +161,7 @@ describe('installed video subtitles', () => {
     });
     const button = page.locator('[data-lingo-owned="subtitles-button"] button');
     await page.locator('video').hover();
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await button.textContent()).toBe('Lingo subtitles'),
     );
     await page.waitForTimeout(500);
@@ -180,7 +181,7 @@ describe('installed video subtitles', () => {
       const video = document.querySelector('video') as HTMLVideoElement;
       video.currentTime = 6;
     });
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await overlay('.translation')).toBe(
         '译:Nobody knew where it was going.',
       ),
@@ -195,13 +196,13 @@ describe('installed video subtitles', () => {
         video.currentTime = target;
       }, time);
     await seek(1);
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await overlay('.translation')).toBe(
         '译:The ship left the harbour before sunrise.',
       ),
     );
     await seek(6);
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await overlay('.translation')).toBe(
         '译:Nobody knew where it was going.',
       ),
@@ -250,7 +251,7 @@ describe('installed video subtitles', () => {
     });
     await page.locator('video').hover();
     await page.locator('[data-lingo-owned="subtitles-button"] button').click();
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(
         await page.evaluate(
           () =>

@@ -1,15 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { resolve } from 'node:path';
 import { type BrowserContext, chromium, type Page } from 'playwright';
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { SupportedUiLocale } from '../../lib/i18n/locales';
 import { resources } from '../../lib/i18n/resources';
 import {
@@ -17,6 +9,7 @@ import {
   type ExtensionSettings,
 } from '../../lib/storage/settings-model';
 import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
+import { waitFor } from './wait';
 
 declare const chrome: {
   storage: {
@@ -243,7 +236,7 @@ describe('installed native reading sidebar', () => {
       document.body.append(probe);
     }, configured.windowId);
     await control.locator('#open-native-panel').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(
         await control.locator('#open-native-panel').getAttribute('data-result'),
       ).toBe('opened');
@@ -258,7 +251,7 @@ describe('installed native reading sidebar', () => {
     // This renders the panel document directly for functional assertions;
     // the preceding check validates the native API, not OS-level placement.
     await panel.goto(`chrome-extension://${extensionId}/sidepanel.html`);
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.hostname').textContent()).toBe(
         'first-reading.test',
       );
@@ -266,13 +259,13 @@ describe('installed native reading sidebar', () => {
     const second = await context.newPage();
     await second.goto('https://second-reading.test/');
     await second.bringToFront();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.hostname').textContent()).toBe(
         'second-reading.test',
       );
     });
     await second.goto('https://third-reading.test/');
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.hostname').textContent()).toBe(
         'third-reading.test',
       );
@@ -303,7 +296,7 @@ describe('installed native reading sidebar', () => {
     await chooseLocalService(panel);
     expect(requests).toEqual([]);
     await panel.locator('.model-connect-button').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.model-catalog-option').count()).toBe(2);
       expect(await panel.locator('.model-selected code').textContent()).toBe(
         'qwen3:8b',
@@ -313,7 +306,7 @@ describe('installed native reading sidebar', () => {
     await panel
       .getByRole('button', { name: copy['modelSetup.testSave'] })
       .click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.main-command').count()).toBe(1);
       expect(await panel.locator('.hostname').textContent()).toBe(
         'first-reading.test',
@@ -336,7 +329,7 @@ describe('installed native reading sidebar', () => {
     expect(openedPages).toEqual([]);
     expect(await currentTab()).toEqual(activeTab);
     await panel.locator('.main-command').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await reading.locator('[data-lingo-translation]').count()).toBe(1);
       expect(
         await reading.locator('[data-lingo-translation]').textContent(),
@@ -348,7 +341,7 @@ describe('installed native reading sidebar', () => {
     ).toBe(true);
     const translationRequestCount = requests.length;
     await panel.locator('.reading-appearance-shortcut').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.reading-appearance').isVisible()).toBe(true);
     });
     await panel
@@ -357,7 +350,7 @@ describe('installed native reading sidebar', () => {
     await panel
       .locator('.reading-appearance-color-picker input')
       .fill('#226688');
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(
         await reading
           .locator('[data-lingo-translation]')
@@ -365,7 +358,7 @@ describe('installed native reading sidebar', () => {
       ).toBe('rgb(34, 102, 136)');
     });
     await backToPage(panel);
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.hostname').textContent()).toBe(
         'first-reading.test',
       );
@@ -375,7 +368,7 @@ describe('installed native reading sidebar', () => {
     expect(requests).toHaveLength(translationRequestCount);
     await panel.locator('.page-preferences > summary').click();
     await panel.locator('.service-manage').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.model-saved-service').count()).toBe(1);
     });
     expect(openedPages).toEqual([]);
@@ -393,7 +386,7 @@ describe('installed native reading sidebar', () => {
     await second.bringToFront();
     await second.goto('https://third-reading.test/');
     await panel.locator('.model-connect-button').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.model-catalog-option').count()).toBe(2);
     });
     await panel
@@ -402,7 +395,7 @@ describe('installed native reading sidebar', () => {
       .click();
     // Returning to connection settings must retain the unsaved endpoint and key.
     await panel.locator('.model-summary-actions > button').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       const bounds = await panel.evaluate(() => ({
         keyTop: document
           .querySelector('input[name="credential"]')
@@ -428,7 +421,7 @@ describe('installed native reading sidebar', () => {
     expect(credentials).toEqual({});
     const importedRequests = structuredClone(requests);
     await backToPage(panel);
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.hostname').textContent()).toBe(
         'third-reading.test',
       );
@@ -447,7 +440,7 @@ describe('installed native reading sidebar', () => {
     await panel
       .getByRole('link', { name: copy['navigation.reading'], exact: true })
       .click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.reading-appearance').isVisible()).toBe(true);
     });
     await panel
@@ -487,7 +480,7 @@ describe('installed native reading sidebar', () => {
       .getByRole('button', { name: copy['modelSetup.testSave'] })
       .click();
     const error = panel.locator('.model-setup-status');
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await error.textContent()).toBe(
         copy['modelSetup.testErrors.authentication'],
       );
@@ -532,7 +525,7 @@ describe('installed native reading sidebar', () => {
     await panel
       .getByRole('button', { name: copy['modelSetup.testSave'] })
       .click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.main-command').isVisible()).toBe(true);
     });
     expect(requests.map((request) => request.method)).toEqual([
@@ -549,7 +542,7 @@ describe('installed native reading sidebar', () => {
     await chooseLocalService(panel);
     blockNextList = true;
     await panel.locator('.model-connect-button').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(requests).toEqual([{ method: 'GET', path: '/v1/models' }]);
       expect(
         await panel.locator('.model-setup').getAttribute('aria-busy'),
@@ -569,7 +562,7 @@ describe('installed native reading sidebar', () => {
     expect(requests).toEqual([{ method: 'GET', path: '/v1/models' }]);
     releaseList?.();
     releaseList = undefined;
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.model-catalog-option').count()).toBe(2);
       expect(
         await panel.locator('.model-setup').getAttribute('aria-busy'),
@@ -599,7 +592,7 @@ describe('installed native reading sidebar', () => {
     await panel
       .getByRole('button', { name: localeCopy['common.openSettings'] })
       .click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.settings-shell').count()).toBe(1);
     });
     expect(context.pages()).toEqual(pages);
@@ -611,7 +604,7 @@ describe('installed native reading sidebar', () => {
         exact: true,
       })
       .click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.reading-appearance').isVisible()).toBe(true);
     });
     await assertFits(panel);
@@ -624,14 +617,14 @@ describe('installed native reading sidebar', () => {
     await chooseLocalService(panel, locale);
     await assertFits(panel);
     await panel.locator('.model-connect-button').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.model-catalog-option').count()).toBe(2);
     });
     await assertFits(panel);
     expect(context.pages()).toEqual(pages);
     expect(await currentTab()).toEqual(activeTab);
     await backToPage(panel, locale);
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await panel.locator('.hostname').count()).toBe(1);
     });
     await assertFits(panel);
@@ -644,7 +637,7 @@ async function openReadingPanel() {
   const panel = await context.newPage();
   await reading.bringToFront();
   await panel.goto(`chrome-extension://${extensionId}/sidepanel.html`);
-  await vi.waitFor(async () => {
+  await waitFor(async () => {
     expect(await panel.locator('.hostname').textContent()).toBe(
       'first-reading.test',
     );

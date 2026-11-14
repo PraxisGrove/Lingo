@@ -1,9 +1,10 @@
 import { createServer, type Server } from 'node:http';
 import { resolve } from 'node:path';
 import { type BrowserContext, chromium, type Page } from 'playwright';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../lib/storage/settings-model';
 import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
+import { waitFor } from './wait';
 
 declare const chrome: {
   storage: {
@@ -124,9 +125,7 @@ describe('installed vocabulary highlighting', () => {
           ? [...highlight].map((range) => range.toString().toLowerCase())
           : [];
       });
-    await vi.waitFor(async () =>
-      expect(await highlighted()).toContain('mutiny'),
-    );
+    await waitFor(async () => expect(await highlighted()).toContain('mutiny'));
     expect(requested).toEqual([]);
     const box = await page.evaluate(() => {
       const text = document.getElementById('story')?.firstChild as Text;
@@ -139,12 +138,12 @@ describe('installed vocabulary highlighting', () => {
     });
     await page.mouse.move(box.x, box.y);
     const card = page.locator('[data-lingo-owned="vocabulary-card"] section');
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await card.textContent()).toContain('兵变'),
     );
     expect(requested).toEqual(['mutiny']);
     await card.getByRole('button', { name: 'Mark as known' }).click();
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await highlighted()).not.toContain('mutiny'),
     );
     const stored = await control.evaluate(() =>

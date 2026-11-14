@@ -1,17 +1,10 @@
 import { createServer, type Server } from 'node:http';
 import { resolve } from 'node:path';
 import { type BrowserContext, chromium, type Page } from 'playwright';
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../lib/storage/settings-model';
 import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
+import { waitFor } from './wait';
 
 declare const chrome: {
   storage: {
@@ -178,7 +171,7 @@ describe('installed Chromium extension translation', () => {
     const article = await openArticle();
     const popup = await openPopup(article);
     await clickPopup(popup, 'Translate page');
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await article.locator('[data-lingo-translation]').count()).toBe(2);
       expect(
         await article
@@ -197,13 +190,13 @@ describe('installed Chromium extension translation', () => {
     expect(sent).not.toContain('Footer sentinel');
     expect(await article.content()).not.toContain(credential);
     await clickPopup(popup, 'Stop translation');
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await article.locator('[data-lingo-translation]').count()).toBe(0),
     );
     expect(await article.locator('main code').textContent()).toBe(
       'private-code-sentinel',
     );
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(
         await article
           .frameLocator('iframe')
@@ -223,7 +216,7 @@ describe('installed Chromium extension translation', () => {
     const frameParagraph = article
       .frameLocator('iframe')
       .locator('[data-lingo-translation]');
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await paragraph.count()).toBe(1);
       expect(await frameParagraph.count()).toBe(1);
     });
@@ -246,7 +239,7 @@ describe('installed Chromium extension translation', () => {
       });
     }, appearance);
     for (const translation of [paragraph, frameParagraph]) {
-      await vi.waitFor(async () => {
+      await waitFor(async () => {
         const typography = await translation.evaluate((element) => {
           const computed = getComputedStyle(element);
           return {
@@ -267,7 +260,7 @@ describe('installed Chromium extension translation', () => {
     expect(requests).toHaveLength(requestCount);
     await article.bringToFront();
     await clickPopup(popup, 'Stop translation');
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await paragraph.count()).toBe(0);
       expect(await frameParagraph.count()).toBe(0);
     });
@@ -365,7 +358,7 @@ describe('installed Chromium extension translation', () => {
     });
     const popup = await openPopup(article);
     await clickPopup(popup, 'Translate page');
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(
         await article.locator('#component [data-lingo-translation]').count(),
       ).toBe(1),
@@ -380,7 +373,7 @@ describe('installed Chromium extension translation', () => {
     expect(sent).not.toContain('Private shadow sentinel');
     expect(sent).not.toContain('Unassigned light sentinel');
     await clickPopup(popup, 'Stop translation');
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(
         await article.locator('#component [data-lingo-translation]').count(),
       ).toBe(0),
@@ -397,7 +390,7 @@ describe('installed Chromium extension translation', () => {
     const article = await openArticle();
     const popup = await openPopup(article);
     await clickPopup(popup, 'Translate page');
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(
         await article.locator('[data-lingo-translation]').getAttribute('lang'),
       ).toBe('zh-CN'),
@@ -405,7 +398,7 @@ describe('installed Chromium extension translation', () => {
     await popup
       .getByRole('combobox', { name: 'Target language', exact: true })
       .selectOption('ja');
-    await vi.waitFor(
+    await waitFor(
       async () =>
         expect(
           await article
@@ -425,7 +418,7 @@ describe('installed Chromium extension translation', () => {
     const before = await article.locator('main').innerHTML();
     const popup = await openPopup(article);
     await clickPopup(popup, 'Translate page');
-    await vi.waitFor(
+    await waitFor(
       async () =>
         expect(await article.locator('[data-lingo-translation]').count()).toBe(
           1,
@@ -446,7 +439,7 @@ describe('installed Chromium extension translation', () => {
       await article.locator('[data-lingo-translation] code').textContent(),
     ).toBe('long-code-sentinel');
     await clickPopup(popup, 'Stop translation');
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await article.locator('main').innerHTML()).toBe(before),
     );
   });
@@ -457,14 +450,14 @@ describe('installed Chromium extension translation', () => {
     const popup = await openPopup(article);
     blockNext = true;
     await clickPopup(popup, 'Translate page');
-    await vi.waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
     await clickPopup(popup, 'Stop translation');
     release?.();
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await article.locator('[data-lingo-translation]').count()).toBe(0),
     );
     await clickPopup(popup, 'Translate page');
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await article.locator('[data-lingo-translation]').count()).toBe(1),
     );
     const before = await snapshot();
@@ -473,7 +466,7 @@ describe('installed Chromium extension translation', () => {
       if (main) main.innerHTML = '<p>New route paragraph.</p>';
       history.pushState({}, '', '/next');
     });
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(
         await article.locator('[data-lingo-translation]').allTextContents(),
       ).toEqual(['Translated: New route paragraph.']);
@@ -485,13 +478,13 @@ describe('installed Chromium extension translation', () => {
       const paragraph = document.querySelector('main p');
       if (paragraph) paragraph.textContent = 'Updated route paragraph.';
     });
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(
         await article.locator('[data-lingo-translation]').allTextContents(),
       ).toEqual(['Translated: Updated route paragraph.']),
     );
     await clickPopup(popup, 'Stop translation');
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await article.locator('main').textContent()).toBe(
         'Updated route paragraph.',
       ),
@@ -514,7 +507,7 @@ describe('installed Chromium extension translation', () => {
         },
       });
     });
-    await vi.waitFor(
+    await waitFor(
       async () => {
         const translated = await article
           .locator('[data-lingo-translation]')
@@ -527,7 +520,7 @@ describe('installed Chromium extension translation', () => {
       { timeout: 10_000 },
     );
     release?.();
-    await vi.waitFor(
+    await waitFor(
       async () =>
         expect(await article.locator('[data-lingo-translation]').count()).toBe(
           101,
@@ -535,7 +528,7 @@ describe('installed Chromium extension translation', () => {
       { timeout: 10_000 },
     );
     await clickPopup(popup, 'Stop translation');
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await article.locator('[data-lingo-translation]').count()).toBe(0),
     );
   });
@@ -545,7 +538,7 @@ describe('installed Chromium extension translation', () => {
     const article = await openArticle();
     const popup = await openPopup(article);
     await clickPopup(popup, 'Translate page');
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await article.locator('[data-lingo-translation]').count()).toBe(1),
     );
     await article.evaluate(() => {
@@ -556,11 +549,9 @@ describe('installed Chromium extension translation', () => {
         new PageTransitionEvent('pageshow', { persisted: true }),
       );
     });
-    await vi.waitFor(async () =>
-      expect((await snapshot()).status).toBe('idle'),
-    );
+    await waitFor(async () => expect((await snapshot()).status).toBe('idle'));
     await clickPopup(popup, 'Translate page');
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(
         await article.locator('[data-lingo-translation]').allTextContents(),
       ).toEqual(['Translated: Restored page paragraph.']),
@@ -589,14 +580,14 @@ describe('installed Chromium extension translation', () => {
         )?.versionId ?? versionId;
     });
     await cdp.send('ServiceWorker.enable');
-    await vi.waitFor(() => expect(versionId).toBeDefined());
+    await waitFor(() => expect(versionId).toBeDefined());
     if (!versionId)
       throw new Error('Missing running extension worker version.');
     blockNext = true;
     await clickPopup(popup, 'Translate page');
-    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    await waitFor(() => expect(requests).toHaveLength(1));
     await cdp.send('ServiceWorker.stopWorker', { versionId });
-    await vi.waitFor(
+    await waitFor(
       async () =>
         expect(
           await article.locator('[data-lingo-translation]').allTextContents(),
@@ -613,7 +604,7 @@ describe('installed Chromium extension translation', () => {
 async function openArticle() {
   const article = await context.newPage();
   await article.goto('https://reading.test/article');
-  await vi.waitFor(async () => expect((await snapshot()).status).toBe('idle'));
+  await waitFor(async () => expect((await snapshot()).status).toBe('idle'));
   return article;
 }
 
@@ -621,7 +612,7 @@ async function openPopup(article: Page) {
   const popup = await context.newPage();
   await article.bringToFront();
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect(await popup.locator('.hostname').textContent()).toBe('reading.test'),
   );
   return popup;
@@ -630,7 +621,7 @@ async function openPopup(article: Page) {
 async function clickPopup(popup: Page, label: string) {
   const button = popup.getByRole('button', { name: label, exact: true });
   await button.waitFor({ state: 'attached', timeout: 10_000 });
-  await vi.waitFor(async () => expect(await button.isEnabled()).toBe(true));
+  await waitFor(async () => expect(await button.isEnabled()).toBe(true));
   await button.evaluate((element: HTMLButtonElement) => element.click());
 }
 
@@ -647,7 +638,7 @@ async function snapshot(): Promise<{ status: string; pageRevision: number }> {
 }
 
 async function expectTextOutput(page: Page, text: string) {
-  await vi.waitFor(
+  await waitFor(
     async () =>
       expect(
         await page

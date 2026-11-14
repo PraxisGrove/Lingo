@@ -1,21 +1,14 @@
 import { createServer, type Server } from 'node:http';
 import { resolve } from 'node:path';
 import { type BrowserContext, chromium, type Page } from 'playwright';
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { resources } from '../../lib/i18n/resources';
 import {
   DEFAULT_SETTINGS,
   type ExtensionSettings,
 } from '../../lib/storage/settings-model';
 import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
+import { waitFor } from './wait';
 
 declare const chrome: {
   storage: {
@@ -306,7 +299,7 @@ describe('installed extension provider setup', () => {
     await options.goto(
       `chrome-extension://${extensionId}/options.html?setup-test=${locale}#provider-heading`,
     );
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await options.locator('html').getAttribute('lang')).toBe(locale);
     });
     await options
@@ -321,7 +314,7 @@ describe('installed extension provider setup', () => {
     await options
       .getByRole('button', { name: copy['modelSetup.connect'], exact: true })
       .click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await options.locator('.model-catalog-option').count()).toBe(2);
       expect(await options.locator('.model-selected code').textContent()).toBe(
         'qwen3:8b',
@@ -343,7 +336,7 @@ describe('installed extension provider setup', () => {
     await options
       .getByRole('button', { name: copy['modelSetup.refresh'], exact: true })
       .click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(requests).toHaveLength(2);
       expect(
         await options.locator('.model-setup').getAttribute('aria-busy'),
@@ -359,7 +352,7 @@ describe('installed extension provider setup', () => {
     await options
       .getByRole('button', { name: copy['modelSetup.testSave'], exact: true })
       .click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await options.locator('.model-ready').count()).toBe(1);
       expect(
         await options.locator('.model-saved-description strong').textContent(),
@@ -400,7 +393,7 @@ describe('installed extension provider setup', () => {
     await options
       .getByRole('button', { name: copy['modelSetup.testSave'], exact: true })
       .click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(
         await options.locator('.model-saved-description small').textContent(),
       ).toBe('edited-model');
@@ -448,7 +441,7 @@ describe('installed extension provider setup', () => {
     await options.locator('input[name="endpoint"]').fill(rootEndpoint);
     await options.locator('input[name="credential"]').fill('incorrect-key');
     await options.locator('.model-connect-button').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(
         await options.locator('.model-discovery-error').textContent(),
       ).toContain('HTTP 401');
@@ -463,10 +456,10 @@ describe('installed extension provider setup', () => {
     await options
       .getByRole('button', { name: copy['modelDiscovery.retry'], exact: true })
       .click();
-    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    await waitFor(() => expect(requests).toHaveLength(2));
     await options.locator('input[name="credential"]').fill('magpie');
     await options.locator('.model-connect-button').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await options.locator('.model-catalog-option').count()).toBe(2);
     });
     expect(requests).toEqual([
@@ -500,7 +493,7 @@ describe('installed extension provider setup', () => {
     await options
       .getByRole('button', { name: copy['modelSetup.testSave'], exact: true })
       .click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await options.locator('.model-ready').count()).toBe(1);
     });
     expect(requests[3]).toEqual({
@@ -571,7 +564,7 @@ describe('installed extension provider setup', () => {
     await options.locator('input[name="endpoint"]').fill(responsesEndpoint);
     await options.locator('input[name="credential"]').fill('responses-key');
     await options.locator('.model-connect-button').click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await options.locator('.model-catalog-option').count()).toBe(2);
     });
     expect(requests).toEqual([
@@ -588,7 +581,7 @@ describe('installed extension provider setup', () => {
     await options
       .getByRole('button', { name: copy['modelSetup.testSave'], exact: true })
       .click();
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await options.locator('.model-ready').count()).toBe(1);
     });
     expect((await savedSettings()).providerProfiles[0]).toMatchObject({
@@ -602,20 +595,20 @@ describe('installed extension provider setup', () => {
     const popup = await context.newPage();
     await article.bringToFront();
     await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(await popup.locator('.hostname').textContent()).toBe('127.0.0.1');
     });
     const translateButton = popup.getByRole('button', {
       name: copy['popup.action.translatePage'],
       exact: true,
     });
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await translateButton.isEnabled()).toBe(true),
     );
     await translateButton.evaluate((button: HTMLButtonElement) =>
       button.click(),
     );
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       expect(
         await article.locator('[data-lingo-translation]').textContent(),
       ).toBe('Hola');

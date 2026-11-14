@@ -1,10 +1,11 @@
 import { createServer, type Server } from 'node:http';
 import { resolve } from 'node:path';
 import { type BrowserContext, chromium, type Page } from 'playwright';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resources } from '../../lib/i18n/resources';
 import { DEFAULT_SETTINGS } from '../../lib/storage/settings-model';
 import { EXTENSION_ACTION_TIMEOUT } from './timeouts';
+import { waitFor } from './wait';
 
 declare const chrome: {
   storage: {
@@ -167,13 +168,13 @@ describe('installed gateway service setup', () => {
         .getAttribute('type'),
     ).toBe('password');
     await options.locator('.model-connect-button').click();
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await options.locator('.model-catalog-option').count()).toBe(1),
     );
     await options
       .getByRole('button', { name: copy['modelSetup.testSave'], exact: true })
       .click();
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await options.locator('.model-ready').count()).toBe(1),
     );
     const expected = {
@@ -212,7 +213,7 @@ describe('installed gateway service setup', () => {
         },
       });
     }, base);
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(
         await page.locator('[data-lingo-translation]').first().textContent(),
       ).toContain('GW: The gateway translates'),
