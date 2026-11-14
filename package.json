@@ -29,6 +29,7 @@
     "check": "biome check .",
     "commitlint": "commitlint",
     "verify:commit": "pnpm lint && pnpm test && pnpm test:browser && pnpm compile && pnpm check && pnpm build && pnpm build:firefox && pnpm test:extension && git diff --check",
+    "ship": "bash scripts/ship.sh",
     "prepare": "lefthook install",
     "postinstall": "wxt prepare",
     "brand:preview": "node scripts/preview-brand.mjs"

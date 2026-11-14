@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - main
+      # A commit is validated on a throwaway ref before main accepts it, because a
+      # push cannot be gated on checks that only run after the ref exists.
+      - "verify/**"
 
 permissions:
   contents: read

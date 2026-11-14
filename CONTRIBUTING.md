@@ -36,6 +36,21 @@ worker is not mistaken for a broken panel.
 Add tests next to the code they cover. Test behavior through public module
 interfaces and avoid direct `console.*` calls; use the scoped logger.
 
+## Landing On Main
+
+Work directly on `main`; pull requests are not required. `main` does require the
+CI checks and enforces that rule for administrators, and GitHub can only run
+checks once a ref exists, so a plain `git push` to `main` is rejected until the
+exact commit has passed. Land a commit with:
+
+```bash
+pnpm ship
+```
+
+`scripts/ship.sh` pushes the current `main` commit to a throwaway `verify/<sha>`
+ref, waits for the CI run for that commit, then pushes the same commit to `main`
+and deletes the verify ref. A failing run keeps the verify ref and stops.
+
 ## Pull Requests
 
 Use a concise imperative title. Describe the behavior changed, list validation
